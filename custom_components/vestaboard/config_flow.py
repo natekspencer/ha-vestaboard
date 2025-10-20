@@ -171,7 +171,8 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
                         if model.is_flagship
                         else VESTABOARD_NOTE_CONNECTED_MESSAGE
                     )
-                    client.write_message(construct_message("\n".join(message)))
+                    json = {"characters": construct_message("\n".join(message))}
+                    client.write_message(json)
                 self.api_key = client.api_key
         except asyncio.TimeoutError:
             errors["base"] = "timeout_connect"

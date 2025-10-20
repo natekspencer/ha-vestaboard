@@ -22,6 +22,10 @@ CONF_MESSAGE: Final = "message"
 CONF_MODEL: Final = "model"
 CONF_QUIET_END: Final = "quiet_end"
 CONF_QUIET_START: Final = "quiet_start"
+CONF_STEP_INTERVAL_MS: Final = "step_interval_ms"
+CONF_STEP_SIZE: Final = "step_size"
+CONF_STRATEGY: Final = "strategy"
+CONF_TRANSITIONS: Final = ["column"]
 CONF_VBML: Final = "vbml"
 
 DATA_HASS_CONFIG: Final = "hass_config"

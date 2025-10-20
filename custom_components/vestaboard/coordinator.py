@@ -6,7 +6,9 @@ from datetime import datetime, timedelta
 import logging
 
 import async_timeout
+import httpx
 from vesta import LocalClient
+from vesta.chars import Rows
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant
@@ -21,6 +23,27 @@ from .vestaboard_model import VestaboardModel
 _LOGGER = logging.getLogger(__name__)
 
 type VestaboardConfigEntry = ConfigEntry[VestaboardCoordinator]
+
+
+def write_message(self: LocalClient, json: dict[str, Rows | str | int]) -> bool:
+    """Write a message to the Vestaboard.
+
+    `json` must be a json object and may contain:
+      - `characters` - a 6x22 array of character codes
+      - `strategy` - column
+      - `step_interval_ms` - step interval in milliseconds
+      - `step_size` - number of columns to animate
+
+    :raises ValueError: if ``characters`` is a list with unsupported dimensions
+    """
+    if not self.enabled:
+        raise RuntimeError("Local API has not been enabled")
+    r = self.http.post("/local-api/message", json=json)
+    r.raise_for_status()
+    return r.status_code == httpx.codes.CREATED
+
+
+LocalClient.write_message = write_message
 
 
 class VestaboardCoordinator(DataUpdateCoordinator):
@@ -102,13 +125,11 @@ class VestaboardCoordinator(DataUpdateCoordinator):
 
         return await self.hass.async_add_executor_job(self.process_data, data)
 
-    async def write_and_update_state(self, message_rows: list[list[int]]) -> None:
+    async def write_and_update_state(self, json: dict[str, Rows | str | int]) -> None:
         """Write to board and immediately update coordinator."""
-        await self.hass.async_add_executor_job(
-            self.vestaboard.write_message, message_rows
-        )
+        await self.hass.async_add_executor_job(self.vestaboard.write_message, json)
         # Manually update coordinator state for instant UI feedback
-        self.async_set_updated_data(self.process_data(message_rows))
+        self.async_set_updated_data(self.process_data(json["characters"]))
 
     async def _handle_temporary_message_expiration(self, now: datetime) -> None:
         """Handle temporary message expiration."""
@@ -118,7 +139,7 @@ class VestaboardCoordinator(DataUpdateCoordinator):
         )
         self.temporary_message_expiration = None
         if rows := self.persistent_message:
-            await self.write_and_update_state(rows)
+            await self.write_and_update_state({"characters": rows})
         if self._cancel_cb:
             self._cancel_cb()
             self._cancel_cb = None

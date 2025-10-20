@@ -21,6 +21,10 @@ from .const import (
     CONF_DURATION,
     CONF_JUSTIFY,
     CONF_MESSAGE,
+    CONF_STEP_INTERVAL_MS,
+    CONF_STEP_SIZE,
+    CONF_STRATEGY,
+    CONF_TRANSITIONS,
     CONF_VBML,
     DOMAIN,
     SERVICE_MESSAGE,
@@ -70,6 +74,9 @@ SERVICE_MESSAGE_SCHEMA = vol.All(
             vol.Optional(CONF_JUSTIFY, default=ALIGN_CENTER): vol.In(ALIGN_HORIZONTAL),
             vol.Optional(CONF_ALIGN, default=ALIGN_CENTER): vol.In(ALIGN_VERTICAL),
             vol.Optional(CONF_VBML): VBML_SCHEMA,
+            vol.Optional(CONF_STRATEGY): vol.In(CONF_TRANSITIONS),
+            vol.Optional(CONF_STEP_INTERVAL_MS): cv.positive_int,
+            vol.Optional(CONF_STEP_SIZE): cv.positive_int,
             vol.Optional(CONF_DURATION): vol.All(
                 vol.Coerce(int), vol.Range(min=10, max=43200)
             ),
@@ -112,6 +119,14 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 vbml = {"components": components}
                 rows = await _translate_vbml(vbml)
 
+        json = {"characters": rows}
+        if strategy := call.data.get(CONF_STRATEGY):
+            json[CONF_STRATEGY] = strategy
+        if step_interval := call.data.get(CONF_STEP_INTERVAL_MS):
+            json[CONF_STEP_INTERVAL_MS] = step_interval
+        if step_size := call.data.get(CONF_STEP_SIZE):
+            json[CONF_STEP_SIZE] = step_size
+
         for device_id in call.data[CONF_DEVICE_ID]:
             coordinator = async_get_coordinator_by_device_id(hass, device_id)
             if coordinator.quiet_hours():
@@ -122,7 +137,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
                     coordinator._cancel_cb()
                 expiration = dt_now() + timedelta(seconds=duration)
                 coordinator.temporary_message_expiration = expiration
-                await coordinator.write_and_update_state(rows)
+                await coordinator.write_and_update_state(json)
                 coordinator._cancel_cb = async_track_point_in_time(
                     hass, coordinator._handle_temporary_message_expiration, expiration
                 )
@@ -130,7 +145,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 coordinator.persistent_message = rows
                 expiration = coordinator.temporary_message_expiration
                 if not (expiration and expiration > dt_now()):
-                    await coordinator.write_and_update_state(rows)
+                    await coordinator.write_and_update_state(json)
 
     hass.services.async_register(
         DOMAIN,
