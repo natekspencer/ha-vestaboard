@@ -1,14 +1,26 @@
 {
   "domain": "vestaboard",
   "name": "Vestaboard",
-  "codeowners": ["@natekspencer"],
+  "codeowners": [
+    "@natekspencer"
+  ],
   "config_flow": true,
-  "dhcp": [{ "macaddress": "4C93A600*" }],
-  "documentation": "https://github.com/natekspencer/hacs-vestaboard",
+  "dhcp": [
+    {
+      "macaddress": "4C93A600*"
+    }
+  ],
+  "documentation": "https://github.com/natekspencer/ha-vestaboard",
   "integration_type": "device",
   "iot_class": "local_polling",
-  "issue_tracker": "https://github.com/natekspencer/hacs-vestaboard/issues",
-  "loggers": ["custom_components.vestaboard", "vesta"],
-  "requirements": ["vesta==0.12.0", "Pillow"],
+  "issue_tracker": "https://github.com/natekspencer/ha-vestaboard/issues",
+  "loggers": [
+    "custom_components.vestaboard",
+    "vesta"
+  ],
+  "requirements": [
+    "vesta==0.12.0",
+    "Pillow"
+  ],
   "version": "0.2.1"
 }
