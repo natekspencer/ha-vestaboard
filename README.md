@@ -70,7 +70,7 @@ Alternatively:
 4. Follow the instructions to add the integration to your Home Assistant
 <!-- END AUTO-GENERATED INSTALLATION -->
 
-# ⚙️ Options
+## ⚙️ Options
 
 After this integration is set up, you can configure the model of your Vestaboard to adjust the image that is generated.
 
@@ -97,7 +97,7 @@ I maintain this Home Assistant integration in my spare time. If you find it usef
 
 If you don't already own a Vestaboard, please consider using my referral link below to get $200 off (as well as a $200 referral bonus to me in appreciation)!
 
-https://web.vestaboard.com/referral?vbref=ZWVLZW
+[Save $200 off a Vestaboard](https://web.vestaboard.com/referral?vbref=ZWVLZW)
 
 ## 📈 Star History
 
