@@ -71,7 +71,7 @@ SERVICE_MESSAGE_SCHEMA = vol.All(
             vol.Optional(CONF_ALIGN, default=ALIGN_CENTER): vol.In(ALIGN_VERTICAL),
             vol.Optional(CONF_VBML): VBML_SCHEMA,
             vol.Optional(CONF_DURATION): vol.All(
-                vol.Coerce(int), vol.Range(min=10, max=7200)
+                vol.Coerce(int), vol.Range(min=10, max=43200)
             ),
         },
     ),
