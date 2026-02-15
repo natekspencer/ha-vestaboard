@@ -58,5 +58,5 @@ message:
       selector:
         number:
           min: 10
-          max: 7200
+          max: 43200
           unit_of_measurement: "seconds"
