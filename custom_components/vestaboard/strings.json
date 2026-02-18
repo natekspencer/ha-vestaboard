@@ -85,6 +85,11 @@
         "center": "Center",
         "justified": "Justified"
       }
+    },
+    "strategy": {
+      "options": {
+        "column": "Column"
+      }
     }
   },
   "services": {

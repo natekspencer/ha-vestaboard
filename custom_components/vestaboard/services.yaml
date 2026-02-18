@@ -14,7 +14,6 @@ message:
     message:
       name: Message
       description: The message to send.
-      required: false
       selector:
         text:
           multiline: true
@@ -46,17 +45,41 @@ message:
     vbml:
       name: Vestaboard markup language
       description: "Compose a static or dynamic message using Vestaboard markup language. Requires cloud access. See https://docs.vestaboard.com/docs/vbml for more information"
-      required: false
       selector:
         text:
       example: '{ "props": { "hours": "07", "minutes": "35" }, "components": [ { "style": { "justify": "center", "align": "center" }, "template": "{{ ''{{hours}}:{{minutes}}'' }}"}]}'
+    strategy:
+      name: Transition strategy
+      description: Transition strategy to use.
+      selector:
+        select:
+          translation_key: strategy
+          options:
+            - column
+      example: column
+    step_interval_ms:
+      name: Step interval
+      description: Step interval for the transition.
+      selector:
+        number:
+          min: 0
+          max: 3000
+          unit_of_measurement: milliseconds
+      example: 500
+    step_size:
+      name: Step size
+      description: Number of columns to animate at the same time for the transition.
+      selector:
+        number:
+          min: 0
+          max: 22
+          unit_of_measurement: columns
+      example: 2
     duration:
       name: Duration
-      description: "Display the message temporarily. The board will revert to its previous persistent message after the duration (in seconds) expires."
-      required: false
-      default: 300
+      description: Display the message temporarily. The board will revert to its previous persistent message after the duration expires.
       selector:
         number:
           min: 10
           max: 43200
-          unit_of_measurement: "seconds"
+          unit_of_measurement: seconds
