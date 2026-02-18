@@ -31,6 +31,7 @@ from .const import (
     DOMAIN,
 )
 from .helpers import construct_message, create_client
+from .vestaboard_model import VestaboardModel
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,6 +51,20 @@ OPTIONS_SCHEMA = vol.Schema(
     }
 )
 OPTIONS_FLOW = {"init": SchemaFlowFormStep(OPTIONS_SCHEMA)}
+
+VESTABOARD_CONNECTED_MESSAGE = [
+    "{63}{63}{63}{63}{63}{63}{64}{64}{64}{64}{64}{64}{64}{64}{64}{65}{65}{65}{65}{65}{65}{65}",
+    "{63}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{65}",
+    "{63}{0} Now connected to {0}{65}",
+    "{68}{0}{0} Home Assistant {0}{0}{66}",
+    "{68}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{66}",
+    "{68}{68}{68}{68}{68}{68}{68}{67}{67}{67}{67}{67}{67}{67}{67}{67}{66}{66}{66}{66}{66}{66}",
+]
+VESTABOARD_NOTE_CONNECTED_MESSAGE = [
+    "{63}Now connected{68}",
+    "{63}{64}{0} to Home {0}{67}{68}",
+    "{63}{64}{65}Assistant{66}{67}{68}",
+]
 
 
 class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -146,24 +161,17 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
             client = await self.hass.async_add_executor_job(
                 create_client, {"host": self.host} | user_input
             )
-            if not client.read_message():
+            if not (data := client.read_message()):
                 errors["base"] = "invalid_api_key"
             else:
                 if write:
-                    client.write_message(
-                        construct_message(
-                            "\n".join(
-                                [
-                                    "{63}{63}{63}{63}{63}{63}{64}{64}{64}{64}{64}{64}{64}{64}{64}{65}{65}{65}{65}{65}{65}{65}",
-                                    "{63}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{65}",
-                                    "{63}{0} Now connected to {0}{65}",
-                                    "{68}{0}{0} Home Assistant {0}{0}{66}",
-                                    "{68}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{0}{66}",
-                                    "{68}{68}{68}{68}{68}{68}{68}{67}{67}{67}{67}{67}{67}{67}{67}{67}{66}{66}{66}{66}{66}{66}",
-                                ]
-                            )
-                        )
+                    model = VestaboardModel.from_color(COLOR_BLACK, data)
+                    message = (
+                        VESTABOARD_CONNECTED_MESSAGE
+                        if model.is_flagship
+                        else VESTABOARD_NOTE_CONNECTED_MESSAGE
                     )
+                    client.write_message(construct_message("\n".join(message)))
                 self.api_key = client.api_key
         except asyncio.TimeoutError:
             errors["base"] = "timeout_connect"

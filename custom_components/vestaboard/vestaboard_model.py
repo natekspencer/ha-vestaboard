@@ -175,6 +175,11 @@ class VestaboardModel:
         """Return the aspect ratio."""
         return MODELS[self.model].aspect_ratio
 
+    @property
+    def is_flagship(self) -> bool:
+        """Return True for the flagship models (black or white)."""
+        return self.model == MODEL_FLAGSHIP
+
     def color_for_code(self, code: int) -> str | None:
         """Return the hex color for a numeric color code, if defined."""
         return self.color_map.get(code)
@@ -182,10 +187,6 @@ class VestaboardModel:
     def char_for_code(self, code: int) -> str | None:
         """Return the character override for a given code, if defined."""
         return self.emoji_map.get(code)
-
-    def is_flagship(self) -> bool:
-        """Return True for the flagship models (black or white)."""
-        return self.model == MODEL_FLAGSHIP
 
     def tile_size(
         self, target_width: float, target_height: float
