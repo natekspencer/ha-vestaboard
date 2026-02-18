@@ -59,7 +59,7 @@ def construct_message(message: str, **kwargs: Any) -> list[list[int]]:
     """Construct a message."""
     message = "".join(EMOJI_MAP.get(char, char) for char in message)
     align = kwargs.get(CONF_JUSTIFY, ALIGN_CENTER)
-    if align in (ALIGN_JUSTIFIED):
+    if align == ALIGN_JUSTIFIED:
         align = ALIGN_CENTER
     valign = kwargs.get(CONF_ALIGN, ALIGN_CENTER)
     if valign in (ALIGN_CENTER, ALIGN_JUSTIFIED):
@@ -201,10 +201,10 @@ def create_png(
                 )
 
             else:
-                emoji = symbol(code)
+                char = symbol(code)
                 draw.text(
                     (xpos + bit_w / 2, ypos + bit_h / 2),
-                    emoji,
+                    char,
                     fill=model.text_color,
                     font=font,
                     anchor="mm",

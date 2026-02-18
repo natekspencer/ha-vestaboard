@@ -90,8 +90,8 @@ MODELS: Final[dict[str, ModelSpec]] = {
         emoji_map={62: "❤️"},
     ),
 }
-MODEL_BY_SIZE: dict[tuple[int, int], str] = {
-    (config.rows, config.columns): model for model, config in MODELS.items()
+MODEL_BY_SIZE: Final[dict[tuple[int, int], str]] = {
+    (spec.rows, spec.columns): model for model, spec in MODELS.items()
 }
 
 
