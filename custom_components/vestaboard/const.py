@@ -26,8 +26,8 @@ CONF_VBML: Final = "vbml"
 
 DATA_HASS_CONFIG: Final = "hass_config"
 
-MODEL_BLACK: Final = "black"
-MODEL_WHITE: Final = "white"
+COLOR_BLACK: Final = "black"
+COLOR_WHITE: Final = "white"
 
 SERVICE_MESSAGE: Final = "message"
 VBML_URL: Final = "https://vbml.vestaboard.com/compose"

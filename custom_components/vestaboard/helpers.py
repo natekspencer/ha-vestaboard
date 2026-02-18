@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import base64
 import io
+import logging
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageOps
 from vesta import Color, LocalClient, encode_text
 
 from homeassistant.core import HomeAssistant, callback
@@ -17,17 +18,25 @@ from homeassistant.util.ssl import get_default_context
 from .const import (
     ALIGN_CENTER,
     ALIGN_JUSTIFIED,
+    COLOR_BLACK,
     CONF_ALIGN,
     CONF_ENABLEMENT_TOKEN,
     CONF_JUSTIFY,
     DOMAIN,
-    MODEL_BLACK,
 )
-from .fontloader import get_font_bytes, load_font
-from .vestaboard_model import VestaboardModel
+from .fontloader import get_font_bytes, load_emoji_font, load_font
+from .vestaboard_model import (
+    BIT_HEIGHT,
+    BIT_HEIGHT_SPACING,
+    BIT_WIDTH,
+    BIT_WIDTH_SPACING,
+    VestaboardModel,
+)
 
 if TYPE_CHECKING:
     from .coordinator import VestaboardCoordinator
+
+_LOGGER = logging.getLogger(__name__)
 
 PRINTABLE = (
     " ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890!@#$() - +&=;: '\"%,.  /? °🟥🟧🟨🟩🟦🟪⬜⬛■"
@@ -50,7 +59,7 @@ def construct_message(message: str, **kwargs: Any) -> list[list[int]]:
     """Construct a message."""
     message = "".join(EMOJI_MAP.get(char, char) for char in message)
     align = kwargs.get(CONF_JUSTIFY, ALIGN_CENTER)
-    if align in (ALIGN_JUSTIFIED):
+    if align == ALIGN_JUSTIFIED:
         align = ALIGN_CENTER
     valign = kwargs.get(CONF_ALIGN, ALIGN_CENTER)
     if valign in (ALIGN_CENTER, ALIGN_JUSTIFIED):
@@ -70,77 +79,158 @@ def create_client(data: dict[str, Any]) -> LocalClient:
     return LocalClient(local_api_key=key, base_url=url, http_client=http_client)
 
 
+def draw_emoji(emoji: str, size: tuple[int, int]) -> Image.Image:
+    """Draw a scaled emoji image at the requested size.
+
+    :param size: The requested size in pixels, as a tuple or array:
+        (width, height).
+    :returns: An :py:class:`~PIL.Image.Image` object.
+    """
+    # draw the emoji
+    width, height = 76, 90
+    emoji_font = load_emoji_font()
+    img = Image.new("RGBA", (width, height))
+    draw = ImageDraw.Draw(img)
+    draw.text((0, -44), emoji, font=emoji_font, embedded_color=True)
+
+    # create the flap line
+    mask = img.getchannel("A")
+    draw = ImageDraw.Draw(mask)
+    hinge_y = int(height * 0.45)
+    draw.line([(0, hinge_y), (width, hinge_y)], fill=0, width=int(height * 0.035))
+    img.putalpha(mask)
+
+    # size appropriately and return
+    return ImageOps.contain(img, size, Image.LANCZOS)
+
+
 def create_png(
-    data: list[list[int]], color: str = MODEL_BLACK, height: int = 1080
+    data: list[list[int]],
+    color: str = COLOR_BLACK,
+    height: int = 1080,
+    draw_bit: bool = True,
 ) -> bytes:
-    model = VestaboardModel.from_name(color)
+    model = VestaboardModel.from_color(color, data)
 
-    width = int(height * model.aspect_ratio)
-    n_cols = model.columns
+    #  Physical scale
+    px_per_in = height / model.height
+    width = int(model.width * px_per_in)
 
-    # Derive scale from target height to preserve original proportions
-    scale = height / 1.77
-
-    # Tile sizes
-    tile_w = scale * 0.09
-    tile_h = scale * 0.11
-
-    # Padding / start
-    start = 0.2
-
-    # Column spacing to fit first/last column exactly
-    column_multiplier = ((width - start * scale * 2) - n_cols * tile_w) / (n_cols - 1)
-
-    # Row multiplier same as original
-    row_multiplier = 0.24
-
-    # Create image
     img = Image.new("RGB", (width, height), color=model.frame_color)
     draw = ImageDraw.Draw(img)
 
+    # Convert physical dimensions to pixels
+
     # Board background
+    outer_border = model.frame_thickness * px_per_in
     draw.rectangle(
         [(0, 0), (width, height)],
         outline=model.bit_color,
-        width=int(scale * 0.02),
+        width=int(outer_border),
     )
 
+    inner_border = model.frame_border * px_per_in
+
+    bit_w = BIT_WIDTH * px_per_in
+    bit_h = BIT_HEIGHT * px_per_in
+
+    gap_x = BIT_WIDTH_SPACING * px_per_in
+    gap_y = BIT_HEIGHT_SPACING * px_per_in
+
+    # Starting position of first bit
+    start_x = outer_border + inner_border
+    start_y = outer_border + inner_border
+
     # Font
-    font = load_font(int(tile_h * 1.1))
+    font = load_font(int(bit_h * 0.8))
 
-    # Draw tiles and characters
+    # Calculate height of squares based on the letter O
+    ascent, descent = font.getmetrics()
+    font_height = ascent + descent
+    text_bbox = draw.textbbox((0, 0), "O", font=font)
+    _, top, _, bottom = text_bbox
+    glyph_height = bottom - top
+
+    # Draw bits
     for row, characters in enumerate(data):
-        for column, code in enumerate(characters):
-            xpos = start * scale + column * column_multiplier + tile_w * column
-            ypos = start * scale + row * row_multiplier * scale
+        ypos = start_y + row * (bit_h + gap_y)
+        for col, code in enumerate(characters):
+            xpos = start_x + col * (bit_w + gap_x)
 
-            if code in (c.value for c in Color):
+            if draw_bit:
                 draw.rectangle(
-                    [(xpos, ypos), (xpos + tile_w, ypos + tile_h * 0.84)],
-                    fill=model.color_map[code],
+                    [(xpos, ypos), (xpos + bit_w, ypos + bit_h)],
+                    fill=model.bit_color,
                 )
-                offset = 0.001 * scale * 0.84
+
+            if code in model.emoji_map:
+                emoji = model.emoji_for_code(code)
+                emoji_img = draw_emoji(emoji, (int(bit_w), int(bit_h)))
+                vertical_padding = (font_height - glyph_height) / 2
+                img.paste(
+                    emoji_img,
+                    (int(xpos), int(ypos + vertical_padding + top)),
+                    emoji_img,
+                )
+
+            elif code in (c.value for c in Color):
+                vertical_padding = (font_height - glyph_height) / 2
+                bit_pad = bit_w * 0.02
                 draw.rectangle(
                     [
-                        (xpos, ypos + tile_h * 0.84 / 2 - offset),
-                        (xpos + tile_w, ypos + tile_h * 0.84 / 2 + offset),
+                        (xpos + bit_pad, ypos + vertical_padding + top),
+                        (
+                            xpos + bit_w - bit_pad,
+                            ypos + vertical_padding + top + glyph_height,
+                        ),
+                    ],
+                    fill=model.color_map[code],
+                )
+
+                flap_top = ypos + bit_h * 0.1
+                flap_bottom = ypos + bit_h * 0.78
+                flap_h = flap_bottom - flap_top
+                stripe_h = bit_h * 0.02
+                stripe_center = flap_top + flap_h / 2
+                draw.rectangle(
+                    [
+                        (xpos, stripe_center - stripe_h / 2),
+                        (xpos + bit_w, stripe_center + stripe_h / 2),
                     ],
                     fill=model.frame_color,
                 )
+
             else:
                 char = symbol(code)
+                draw.text(
+                    (xpos + bit_w / 2, ypos + bit_h / 2),
+                    char,
+                    fill=model.text_color,
+                    font=font,
+                    anchor="mm",
+                )
 
-                cx = xpos + tile_w / 2
-                cy = ypos + tile_h / 2
-                draw.text((cx, cy), char, fill=model.text_color, font=font, anchor="mm")
+    # logo placement
+    logo_text = "VESTABOARD"
+    logo_font = load_font(int(bit_h * 0.3))
 
-    # Logo text
-    logo_font = load_font(int(0.048 * scale))
+    text_bbox = draw.textbbox((0, 0), logo_text, font=logo_font)
+    text_height = text_bbox[3] - text_bbox[1]
+
+    bottom_inner_top = start_y + model.rows * (bit_h + gap_y)
+    bottom_inner_height = inner_border
+
+    # vertical center of inner border
+    inner_center_y = bottom_inner_top + bottom_inner_height / 2
+
+    # adjust y to place visual center of text at inner_center_y
+    logo_y = inner_center_y - text_height
+
     draw.text(
-        (width / 2, scale * 1.64),
-        "VESTABOARD",
-        fill=model.bit_color,
-        anchor="mm",
+        (width / 2, logo_y),
+        logo_text,
+        fill=model.logo_color,
+        anchor="md",
         font=logo_font,
     )
 
@@ -149,9 +239,12 @@ def create_png(
     return buffer.getvalue()
 
 
-def create_svg(data: list[list[int]], color: str = MODEL_BLACK) -> str:
-    """Create an svg for the message from the Vestaboard."""
-    model = VestaboardModel(color)
+def create_svg(data: list[list[int]], color: str = COLOR_BLACK) -> str:
+    """Create an svg for the message from the Vestaboard.
+
+    This currently only works for the original Vestaboard Flagship model (6 x 22).
+    """
+    model = VestaboardModel.from_color(color, data)
 
     encoded_font = base64.b64encode(get_font_bytes()).decode("ascii")
     font_face = f"""@font-face {{

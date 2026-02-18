@@ -9,21 +9,23 @@ from typing import Final
 from PIL import ImageFont
 
 FONT_NAME: Final = "Vestaboard.otf"
+FONT_EMOJI: Final = "VestaEmojis.ttf"
+FONT_EMOJI_SIZE: Final = 128
 
 
-def _load_font_bytes() -> bytes:
+def _load_font_bytes(name: str = FONT_NAME) -> bytes:
     """Load the raw font bytes from the font file."""
-    return resources.read_binary(__package__, FONT_NAME)
+    return resources.read_binary(__package__, name)
 
 
-def get_font_buffer() -> io.BytesIO:
+def get_font_buffer(name: str = FONT_NAME) -> io.BytesIO:
     """Return the font as a BytesIO stream."""
-    return io.BytesIO(_load_font_bytes())
+    return io.BytesIO(_load_font_bytes(name))
 
 
-def get_font_bytes() -> bytes:
+def get_font_bytes(name: str = FONT_NAME) -> bytes:
     """Return raw font bytes."""
-    return _load_font_bytes()
+    return _load_font_bytes(name)
 
 
 def load_font(size: float | None) -> ImageFont:
@@ -32,3 +34,11 @@ def load_font(size: float | None) -> ImageFont:
         return ImageFont.truetype(get_font_buffer(), size=size)
     except OSError:
         return ImageFont.load_default(size)
+
+
+def load_emoji_font() -> ImageFont:
+    """Load an emoji font."""
+    try:
+        return ImageFont.truetype(get_font_buffer(FONT_EMOJI), size=FONT_EMOJI_SIZE)
+    except OSError:
+        return ImageFont.load_default()

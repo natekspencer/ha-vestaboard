@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-import logging
-
 from homeassistant.helpers.entity import DeviceInfo, EntityDescription
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import VestaboardConfigEntry, VestaboardCoordinator
-
-_LOGGER = logging.getLogger(__name__)
 
 
 class VestaboardEntity(CoordinatorEntity[VestaboardCoordinator]):
@@ -32,5 +28,7 @@ class VestaboardEntity(CoordinatorEntity[VestaboardCoordinator]):
             identifiers={(DOMAIN, entry.entry_id)},
             name=entry.title,
             manufacturer="Vestaboard",
-            model="Vestaboard",
+            model=entry.runtime_data.model.name
+            if entry.runtime_data.model
+            else "Vestaboard",
         )
