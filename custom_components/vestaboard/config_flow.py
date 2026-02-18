@@ -22,13 +22,13 @@ from homeassistant.helpers.schema_config_entry_flow import (
 from homeassistant.helpers.selector import TimeSelector
 
 from .const import (
+    COLOR_BLACK,
+    COLOR_WHITE,
     CONF_ENABLEMENT_TOKEN,
     CONF_MODEL,
     CONF_QUIET_END,
     CONF_QUIET_START,
     DOMAIN,
-    MODEL_BLACK,
-    MODEL_WHITE,
 )
 from .helpers import construct_message, create_client
 
@@ -42,8 +42,8 @@ STEP_USER_DATA_SCHEMA = vol.Schema({vol.Required(CONF_HOST): str}).extend(
 )
 OPTIONS_SCHEMA = vol.Schema(
     {
-        vol.Required(CONF_MODEL, default=MODEL_BLACK): vol.In(
-            {MODEL_BLACK: "Flagship Black", MODEL_WHITE: "Vestaboard White"}
+        vol.Required(CONF_MODEL, default=COLOR_BLACK): vol.In(
+            {COLOR_BLACK: "Black", COLOR_WHITE: "White"}
         ),
         vol.Optional(CONF_QUIET_START): TimeSelector(),
         vol.Optional(CONF_QUIET_END): TimeSelector(),

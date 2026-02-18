@@ -42,7 +42,7 @@
     "step": {
       "init": {
         "data": {
-          "model": "Select your Vestaboard model to change the image that is generated.",
+          "model": "Select your Vestaboard color to change the image that is generated",
           "quiet_start": "Quiet hours start time",
           "quiet_end": "Quiet hours end time"
         }

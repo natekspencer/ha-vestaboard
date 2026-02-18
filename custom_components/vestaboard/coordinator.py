@@ -14,8 +14,9 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 import homeassistant.util.dt as dt_util
 
-from .const import CONF_MODEL, CONF_QUIET_END, CONF_QUIET_START, DOMAIN, MODEL_BLACK
+from .const import COLOR_BLACK, CONF_MODEL, CONF_QUIET_END, CONF_QUIET_START, DOMAIN
 from .helpers import create_png, decode
+from .vestaboard_model import VestaboardModel
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -53,7 +54,8 @@ class VestaboardCoordinator(DataUpdateCoordinator):
         )
         self.vestaboard = vestaboard
 
-        self.model = config_entry.options.get(CONF_MODEL, MODEL_BLACK)
+        self.model: VestaboardModel | None = None
+        self.model_color = config_entry.options.get(CONF_MODEL, COLOR_BLACK)
         if (start := config_entry.options.get(CONF_QUIET_START)) != (
             end := config_entry.options.get(CONF_QUIET_END)
         ):
@@ -65,9 +67,11 @@ class VestaboardCoordinator(DataUpdateCoordinator):
     def process_data(self, data: list[list[int]]) -> list[list[int]]:
         """Process data."""
         if data != self.data:
+            if self.model is None:
+                self.model = VestaboardModel.from_color(self.model_color, data)
             self.last_updated = dt_util.now()
             self.message = decode(data)
-            self.image = create_png(data, self.model)
+            self.image = create_png(data, self.model_color)
         return data
 
     def quiet_hours(self) -> bool:
