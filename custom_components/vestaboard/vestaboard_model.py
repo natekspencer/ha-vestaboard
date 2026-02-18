@@ -29,7 +29,6 @@ class ColorTheme:
 class ModelSpec:
     rows: int
     columns: int
-    aspect_ratio: float
     width: float
     height: float
     frame_thickness: float
@@ -56,7 +55,7 @@ WHITE_COLOR_MAP: Final[dict[int, str]] = BLACK_COLOR_MAP | {
     71: "#000000",  # filled
 }
 
-COLOR_SCHEMES: dict[str, ColorTheme] = {
+COLOR_SCHEMES: Final[dict[str, ColorTheme]] = {
     COLOR_BLACK: ColorTheme(
         frame="#171818",
         bit="#141414",
@@ -72,11 +71,10 @@ COLOR_SCHEMES: dict[str, ColorTheme] = {
         color_map=WHITE_COLOR_MAP,
     ),
 }
-MODELS: dict[str, ModelSpec] = {
+MODELS: Final[dict[str, ModelSpec]] = {
     MODEL_FLAGSHIP: ModelSpec(
         rows=6,
         columns=22,
-        aspect_ratio=1.87,
         width=41.2,
         height=22,
         frame_thickness=5 / 32,
@@ -85,7 +83,6 @@ MODELS: dict[str, ModelSpec] = {
     MODEL_NOTE: ModelSpec(
         rows=3,
         columns=15,
-        aspect_ratio=2.25,
         width=28.4,
         height=12.2,
         frame_thickness=5 / 32,
@@ -180,11 +177,11 @@ class VestaboardModel:
     @property
     def aspect_ratio(self) -> float:
         """Return the aspect ratio."""
-        return MODELS[self.model].aspect_ratio
+        return MODELS[self.model].width / MODELS[self.model].height
 
     @property
     def is_flagship(self) -> bool:
-        """Return True for the flagship models (black or white)."""
+        """Return True if this is a flagship model (6 rows x 22 columns)."""
         return self.model == MODEL_FLAGSHIP
 
     def color_for_code(self, code: int) -> str | None:
@@ -208,13 +205,13 @@ class VestaboardModel:
         tile_width, tile_height = self.tile_size(target_width, target_height)
         return tile_width / tile_height
 
-    @classmethod
-    def all_models(cls) -> list[str]:
+    @staticmethod
+    def all_models() -> list[str]:
         """Return all known Vestaboard model names."""
         return list(MODELS.keys())
 
-    @classmethod
-    def all_colors(cls) -> list[str]:
+    @staticmethod
+    def all_colors() -> list[str]:
         """Return all known Vestaboard color names."""
         return list(COLOR_SCHEMES.keys())
 

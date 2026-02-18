@@ -79,7 +79,7 @@ def create_client(data: dict[str, Any]) -> LocalClient:
     return LocalClient(local_api_key=key, base_url=url, http_client=http_client)
 
 
-def draw_emoji(emoji: str, size: tuple[int, int] | list[int]) -> Image.Image:
+def draw_emoji(emoji: str, size: tuple[int, int]) -> Image.Image:
     """Draw a scaled emoji image at the requested size.
 
     :param size: The requested size in pixels, as a tuple or array:
@@ -240,7 +240,10 @@ def create_png(
 
 
 def create_svg(data: list[list[int]], color: str = COLOR_BLACK) -> str:
-    """Create an svg for the message from the Vestaboard."""
+    """Create an svg for the message from the Vestaboard.
+
+    This currently only works for the original Vestaboard Flagship model (6 x 22).
+    """
     model = VestaboardModel.from_color(color, data)
 
     encoded_font = base64.b64encode(get_font_bytes()).decode("ascii")
