@@ -36,9 +36,9 @@ def load_font(size: float | None) -> ImageFont:
         return ImageFont.load_default(size)
 
 
-def load_emoji_font(size: float | None = None) -> ImageFont:
+def load_emoji_font() -> ImageFont:
     """Load an emoji font."""
     try:
         return ImageFont.truetype(get_font_buffer(FONT_EMOJI), size=FONT_EMOJI_SIZE)
     except OSError:
-        return ImageFont.load_default(size)
+        return ImageFont.load_default()

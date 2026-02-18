@@ -28,5 +28,7 @@ class VestaboardEntity(CoordinatorEntity[VestaboardCoordinator]):
             identifiers={(DOMAIN, entry.entry_id)},
             name=entry.title,
             manufacturer="Vestaboard",
-            model=entry.runtime_data.model.name,
+            model=entry.runtime_data.model.name
+            if entry.runtime_data.model
+            else "Vestaboard",
         )

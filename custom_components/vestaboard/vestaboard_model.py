@@ -105,6 +105,13 @@ class VestaboardModel:
     color: str
     model: str
 
+    def __post_init__(self) -> None:
+        """Validate color and model."""
+        if self.color not in COLOR_SCHEMES:
+            raise ValueError(f"Unknown color: {self.color!r}")
+        if self.model not in MODELS:
+            raise ValueError(f"Unknown model: {self.model!r}")
+
     @property
     def name(self) -> str:
         """Return the name."""
@@ -162,7 +169,7 @@ class VestaboardModel:
 
     @property
     def frame_border(self) -> float:
-        """Return the physical frame boarder, in inches."""
+        """Return the physical frame border, in inches."""
         return MODELS[self.model].frame_border
 
     @property
@@ -184,8 +191,8 @@ class VestaboardModel:
         """Return the hex color for a numeric color code, if defined."""
         return self.color_map.get(code)
 
-    def char_for_code(self, code: int) -> str | None:
-        """Return the character override for a given code, if defined."""
+    def emoji_for_code(self, code: int) -> str | None:
+        """Return the emoji override for a given code, if defined."""
         return self.emoji_map.get(code)
 
     def tile_size(

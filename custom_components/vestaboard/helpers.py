@@ -79,7 +79,7 @@ def create_client(data: dict[str, Any]) -> LocalClient:
     return LocalClient(local_api_key=key, base_url=url, http_client=http_client)
 
 
-def draw_emoji(emoji: str, size: tuple[int, int] | list[int]) -> Image:
+def draw_emoji(emoji: str, size: tuple[int, int] | list[int]) -> Image.Image:
     """Draw a scaled emoji image at the requested size.
 
     :param size: The requested size in pixels, as a tuple or array:
@@ -119,6 +119,8 @@ def create_png(
     img = Image.new("RGB", (width, height), color=model.frame_color)
     draw = ImageDraw.Draw(img)
 
+    # Convert physical dimensions to pixels
+
     # Board background
     outer_border = model.frame_thickness * px_per_in
     draw.rectangle(
@@ -127,8 +129,6 @@ def create_png(
         width=int(outer_border),
     )
 
-    #  Convert physical dimensions to pixels
-    outer_border = model.frame_thickness * px_per_in
     inner_border = model.frame_border * px_per_in
 
     bit_w = BIT_WIDTH * px_per_in
@@ -148,7 +148,7 @@ def create_png(
     ascent, descent = font.getmetrics()
     font_height = ascent + descent
     text_bbox = draw.textbbox((0, 0), "O", font=font)
-    left, top, right, bottom = text_bbox
+    _, top, _, bottom = text_bbox
     glyph_height = bottom - top
 
     # Draw bits
@@ -164,7 +164,7 @@ def create_png(
                 )
 
             if code in model.emoji_map:
-                emoji = model.char_for_code(code)
+                emoji = model.emoji_for_code(code)
                 emoji_img = draw_emoji(emoji, (int(bit_w), int(bit_h)))
                 vertical_padding = (font_height - glyph_height) / 2
                 img.paste(
@@ -228,7 +228,7 @@ def create_png(
 
     draw.text(
         (width / 2, logo_y),
-        "VESTABOARD",
+        logo_text,
         fill=model.logo_color,
         anchor="md",
         font=logo_font,
@@ -241,7 +241,7 @@ def create_png(
 
 def create_svg(data: list[list[int]], color: str = COLOR_BLACK) -> str:
     """Create an svg for the message from the Vestaboard."""
-    model = VestaboardModel(color)
+    model = VestaboardModel.from_color(color, data)
 
     encoded_font = base64.b64encode(get_font_bytes()).decode("ascii")
     font_face = f"""@font-face {{
