@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import logging
 
-from homeassistant.components import notify as hass_notify
-from homeassistant.const import CONF_NAME, Platform
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
-from homeassistant.helpers import discovery
 from homeassistant.helpers.typing import ConfigType
 
 from .const import DATA_HASS_CONFIG, DOMAIN
@@ -44,16 +42,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: VestaboardConfigEntry) -
 
     entry.runtime_data = coordinator
 
-    hass.async_create_task(
-        discovery.async_load_platform(
-            hass,
-            Platform.NOTIFY,
-            DOMAIN,
-            {CONF_NAME: entry.title, "coordinator": coordinator},
-            hass.data[DOMAIN][DATA_HASS_CONFIG],
-        )
-    )
-
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     entry.async_on_unload(entry.add_update_listener(update_listener))
@@ -63,9 +51,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: VestaboardConfigEntry) -
 
 async def async_unload_entry(hass: HomeAssistant, entry: VestaboardConfigEntry) -> bool:
     """Unload a config entry."""
-    if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
-        await hass_notify.async_reload(hass, DOMAIN)
-    return unload_ok
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 
 async def update_listener(hass: HomeAssistant, entry: VestaboardConfigEntry) -> None:
