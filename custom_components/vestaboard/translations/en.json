@@ -1,10 +1,4 @@
 {
-  "issues": {
-    "deprecated_notify_vestaboard": {
-      "title": "Deprecated notify action used",
-      "description": "The action `notify.{action_name}` has been deprecated. This will stop working in a future version of the Vestaboard integration. To fix the issue, use the `vestaboard.message` action instead and restart Home Assistant."
-    }
-  },
   "config": {
     "step": {
       "user": {
