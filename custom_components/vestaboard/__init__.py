@@ -33,7 +33,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: VestaboardConfigEntry) -> bool:
     """Set up Vestaboard from a config entry."""
-    client = create_client(entry.data)
+    client = await create_client(hass, entry.data)
     coordinator = VestaboardCoordinator(hass, entry, client)
     await coordinator.async_config_entry_first_refresh()
 

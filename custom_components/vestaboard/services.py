@@ -10,7 +10,6 @@ from homeassistant.const import CONF_DEVICE_ID
 from homeassistant.core import HomeAssistant, HomeAssistantError, ServiceCall, callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.event import async_track_point_in_time
-from homeassistant.helpers.httpx_client import get_async_client
 from homeassistant.util.dt import now as dt_now
 
 from .const import (
@@ -28,11 +27,26 @@ from .const import (
     CONF_VBML,
     DOMAIN,
     SERVICE_MESSAGE,
-    VBML_URL,
 )
-from .helpers import async_get_coordinator_by_device_id, construct_message
+from .helpers import async_get_coordinator_by_device_id
 
+_calendar = vol.Schema(
+    {
+        vol.Required("month"): vol.All(vol.Coerce(int), vol.Range(min=1, max=12)),
+        vol.Required("year"): vol.Coerce(int),
+        vol.Optional("defaultDayColor"): vol.All(
+            vol.Coerce(int), vol.Range(min=63, max=70)
+        ),
+        vol.Optional("days"): vol.Coerce(dict[str, int]),
+        vol.Optional("hideSMTWTFS"): vol.Coerce(bool),
+        vol.Optional("hideDates"): vol.Coerce(bool),
+        vol.Optional("hideMonthYear"): vol.Coerce(bool),
+    }
+)
 _character_codes = vol.All(vol.Coerce(int), vol.Range(min=0, max=71))
+_random_colors = vol.Schema(
+    {vol.Optional("colors"): [vol.All(int, vol.Range(min=63, max=71))]}
+)
 _raw_characters = vol.All(cv.ensure_list, [vol.All(cv.ensure_list, [_character_codes])])
 _style = vol.Schema(
     {
@@ -53,15 +67,18 @@ _component = vol.All(
         {
             vol.Optional("template"): cv.string,
             vol.Optional("rawCharacters"): _raw_characters,
+            vol.Optional("calendar"): _calendar,
+            vol.Optional("randomColors"): _random_colors,
             vol.Optional("style"): _style,
         }
     ),
-    cv.has_at_least_one_key("template", "rawCharacters"),
+    cv.has_at_least_one_key("template", "rawCharacters", "calendar", "randomColors"),
 )
 
 VBML_SCHEMA = vol.Schema(
     {
         vol.Optional("props"): {cv.string: cv.string},
+        # Styles to set the size of the rendered array of arrays is purposefully missing and controlled by code
         vol.Required("components"): vol.All(cv.ensure_list, [_component]),
     }
 )
@@ -92,34 +109,20 @@ def async_setup_services(hass: HomeAssistant) -> None:
 
     async def _async_service_message(call: ServiceCall) -> None:
         """Send a message to a Vestaboard."""
+        if not (vbml := call.data.get(CONF_VBML)):
+            align = call.data.get(CONF_ALIGN, ALIGN_CENTER)
+            justify = call.data.get(CONF_JUSTIFY, ALIGN_CENTER)
+            message = {
+                "style": {CONF_ALIGN: align, CONF_JUSTIFY: justify},
+                "template": call.data.get(CONF_MESSAGE, "")
+                .replace(" ", "{70}")
+                .replace("\n\n", "\n{70}\n"),
+            }
+            components = [message]
 
-        async def _translate_vbml(vbml: dict) -> list[list[int]]:
-            """Translate VBML."""
-            client = get_async_client(hass)
-            response = await client.post(VBML_URL, json=vbml)
-            if response.is_error and b"message" in response.content:
-                raise HomeAssistantError(response.json())
-            response.raise_for_status()
-            return response.json()
+            vbml = {"components": components}
 
-        if vbml := call.data.get(CONF_VBML):
-            rows = await _translate_vbml(vbml)
-        else:
-            try:
-                rows = construct_message(**{CONF_MESSAGE: ""} | call.data)
-            except ValueError:
-                align = call.data.get(CONF_ALIGN, ALIGN_CENTER)
-                justify = call.data.get(CONF_JUSTIFY, ALIGN_CENTER)
-                message = {
-                    "style": {CONF_ALIGN: align, CONF_JUSTIFY: justify},
-                    "template": call.data.get(CONF_MESSAGE, ""),
-                }
-                components = [message]
-
-                vbml = {"components": components}
-                rows = await _translate_vbml(vbml)
-
-        json = {"characters": rows}
+        json = {}
         if strategy := call.data.get(CONF_STRATEGY):
             json[CONF_STRATEGY] = strategy
         if step_interval := call.data.get(CONF_STEP_INTERVAL_MS):
@@ -131,6 +134,12 @@ def async_setup_services(hass: HomeAssistant) -> None:
             coordinator = async_get_coordinator_by_device_id(hass, device_id)
             if coordinator.quiet_hours():
                 continue
+
+            try:
+                rows = coordinator.model.parse_vbml(vbml)
+            except Exception as ex:
+                raise HomeAssistantError from ex
+            json["characters"] = rows
 
             if duration := call.data.get(CONF_DURATION):  # This is a temporary message
                 if coordinator._cancel_cb:

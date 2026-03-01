@@ -82,7 +82,13 @@
     },
     "strategy": {
       "options": {
-        "column": "Column"
+        "classic": "Classic (all-at-once)",
+        "column": "Wave (left-to-right)",
+        "reverse-column": "Drift (right-to-left)",
+        "edges-to-center": "Curtain (outside-in, meeting in center)",
+        "row": "Row (top-to-bottom)",
+        "diagonal": "Diagonal (top left corner to bottom right corner)",
+        "random": "Random bits"
       }
     }
   },
