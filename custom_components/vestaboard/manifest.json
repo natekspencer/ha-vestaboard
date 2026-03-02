@@ -19,7 +19,7 @@
     "pyvbml"
   ],
   "requirements": [
-    "pyvbml==0.3.0",
+    "pyvbml==0.3.1",
     "Pillow"
   ],
   "version": "0.2.1"
