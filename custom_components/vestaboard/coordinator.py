@@ -13,7 +13,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 import homeassistant.util.dt as dt_util
 
-from .client import VestaboardLocalClient
+from .client import InvalidApiKeyError, VestaboardLocalClient
 from .const import COLOR_BLACK, CONF_MODEL, CONF_QUIET_END, CONF_QUIET_START, DOMAIN
 from .helpers import create_png, decode
 from .vestaboard_model import VestaboardModel
@@ -88,6 +88,8 @@ class VestaboardCoordinator(DataUpdateCoordinator):
         try:
             async with async_timeout.timeout(10):
                 data = await self.vestaboard.read_message()
+        except InvalidApiKeyError as err:
+            raise ConfigEntryAuthFailed from err
         except Exception as ex:
             raise UpdateFailed(
                 f"Couldn't read vestaboard at {self.vestaboard.base_url}"
@@ -111,7 +113,7 @@ class VestaboardCoordinator(DataUpdateCoordinator):
         data = await self.hass.async_add_executor_job(
             self.process_data, json["characters"]
         )
-        self.async_set_updated_data(self.process_data(data))
+        self.async_set_updated_data(data)
 
     async def _handle_temporary_message_expiration(self, now: datetime) -> None:
         """Handle temporary message expiration."""

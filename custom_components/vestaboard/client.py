@@ -5,10 +5,26 @@ from __future__ import annotations
 from enum import StrEnum
 import json
 
-from aiohttp import ClientSession
+from aiohttp import ClientResponse, ClientSession
 
 DEFAULT_PORT = 7000
 DEFAULT_URL = f"http://vestaboard.local:{DEFAULT_PORT}"
+
+
+class InvalidApiKeyError(Exception):
+    """Invalid API key error."""
+
+
+async def _parse_response(
+    response: ClientResponse, key: str | None = None
+) -> dict | str | list[list[int]] | None:
+    """Parse response."""
+    try:
+        raw = await response.text()
+        payload = json.loads(raw)
+        return payload.get(key) if key else payload
+    except json.JSONDecodeError:
+        return None
 
 
 class EndpointStatus(StrEnum):
@@ -67,16 +83,11 @@ class VestaboardLocalClient:
         )
         resp.raise_for_status()
 
-        try:
-            message = await resp.text()
-            local_api_key = json.loads(message).get("apiKey")
-        except json.JSONDecodeError:
-            local_api_key = None
+        api_key: str | None = None
+        if api_key := await _parse_response(resp, "apiKey"):
+            self.api_key = api_key
 
-        if local_api_key:
-            self.api_key = local_api_key
-
-        return local_api_key
+        return api_key
 
     async def read_message(self) -> list[list[int]] | None:
         """Read the Vestaboard's current message."""
@@ -86,13 +97,12 @@ class VestaboardLocalClient:
             f"{self.base_url}/local-api/message",
             headers={"X-Vestaboard-Local-Api-Key": self.api_key},
         )
+        if resp.status == 401 and (await resp.text()) == "Invalid API key":
+            raise InvalidApiKeyError("Invalid API key")
         resp.raise_for_status()
-        try:
-            message = await resp.text()
-            self.data = json.loads(message).get("message")
-        except json.JSONDecodeError:
-            return None
-        return self.data
+        if message := await _parse_response(resp, "message"):
+            self.data = message
+        return message
 
     async def write_message(
         self, json: dict[str, str | int | list[list[int]]] | list[list[int]]
@@ -117,13 +127,14 @@ class VestaboardLocalClient:
         if not self.enabled:
             raise RuntimeError("Local API has not been enabled")
 
-        if isinstance(json, dict) and json.get("strategy") == "classic":
-            json.pop("strategy")
+        payload = dict(json) if isinstance(json, dict) else json
+        if isinstance(payload, dict) and payload.get("strategy") == "classic":
+            payload.pop("strategy")
 
         resp = await self.session.post(
             f"{self.base_url}/local-api/message",
             headers={"X-Vestaboard-Local-Api-Key": self.api_key},
-            json=json,
+            json=payload,
         )
         resp.raise_for_status()
         return resp.status == 201
@@ -135,7 +146,8 @@ class VestaboardLocalClient:
             headers={"X-Vestaboard-Local-Api-Key": self.api_key or ""},
             timeout=5,
         )
-        if resp.status == 200:
+        if resp.status == 200 and (message := await _parse_response(resp, "message")):
+            self.data = message
             return EndpointStatus.VALID
         if resp.status == 401 and (await resp.text()) == "Invalid API key":
             return EndpointStatus.INVALID_API_KEY

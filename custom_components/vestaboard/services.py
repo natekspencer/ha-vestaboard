@@ -135,6 +135,10 @@ def async_setup_services(hass: HomeAssistant) -> None:
             if coordinator.quiet_hours():
                 continue
 
+            if coordinator.model is None:
+                await coordinator.async_request_refresh()
+            if coordinator.model is None:
+                raise HomeAssistantError("Vestaboard model is not initialized")
             try:
                 rows = coordinator.model.parse_vbml(vbml)
             except Exception as ex:

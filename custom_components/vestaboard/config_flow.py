@@ -174,6 +174,8 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
                     json = {"characters": model.parse_template("\n".join(message))}
                     await client.write_message(json)
                 self.api_key = client.api_key
+            else:
+                errors["base"] = "unknown"
         except asyncio.TimeoutError:
             errors["base"] = "timeout_connect"
         except ClientConnectorError:
