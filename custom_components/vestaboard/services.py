@@ -117,7 +117,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
             message = {
                 "style": {CONF_ALIGN: align, CONF_JUSTIFY: justify},
                 "template": call.data.get(CONF_MESSAGE, "")
-                .replace(" ", "{70}")
+                .replace("  ", "{70}{70}")
                 .replace("\n\n", "\n{70}\n"),
             }
             components = [message]
