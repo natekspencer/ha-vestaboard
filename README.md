@@ -78,7 +78,7 @@ Models:
 
 - Flagship Black
   ![Flagship Black Connected](images/flagship-black.png)
-- Vestaboard White
+- Flagship White
   ![Flagship White Connected](images/flagship-white.png)
 - Note Black
   ![Note Black Connected](images/note-black.png)
