@@ -104,9 +104,14 @@ class VestaboardCoordinator(DataUpdateCoordinator):
         self, json: dict[str, list[list[int]] | str | int]
     ) -> None:
         """Write to board and immediately update coordinator."""
-        await self.vestaboard.write_message(json)
+        if not await self.vestaboard.write_message(json):
+            raise UpdateFailed(f"Failed to write message to {self.name}")
+
         # Manually update coordinator state for instant UI feedback
-        self.async_set_updated_data(self.process_data(json["characters"]))
+        data = await self.hass.async_add_executor_job(
+            self.process_data, json["characters"]
+        )
+        self.async_set_updated_data(self.process_data(data))
 
     async def _handle_temporary_message_expiration(self, now: datetime) -> None:
         """Handle temporary message expiration."""

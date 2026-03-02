@@ -247,5 +247,6 @@ class VestaboardModel:
 
     def parse_vbml(self, data: IVBML) -> list[list[int]]:
         """Parse VBML using the model's size."""
+        # Force array size to match this model
         data["style"] = {"height": self.rows, "width": self.columns}
         return vbml.parse(data)

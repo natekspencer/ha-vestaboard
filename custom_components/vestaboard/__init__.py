@@ -51,7 +51,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: VestaboardConfigEntry) -
 
 async def async_unload_entry(hass: HomeAssistant, entry: VestaboardConfigEntry) -> bool:
     """Unload a config entry."""
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    await entry.runtime_data.vestaboard.close()
+    return unload_ok
 
 
 async def update_listener(hass: HomeAssistant, entry: VestaboardConfigEntry) -> None:

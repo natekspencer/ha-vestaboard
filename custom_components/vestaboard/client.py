@@ -43,7 +43,7 @@ class VestaboardLocalClient:
         self.api_key = api_key
         self.base_url = base_url
         self.session = session or ClientSession()
-        self.should_close = session is not None
+        self.should_close = session is None
         self.data: list[list[int]] | None = None
 
     def __repr__(self):
@@ -55,7 +55,7 @@ class VestaboardLocalClient:
         support has been enabled."""
         return self.api_key is not None
 
-    async def enable(self, enablement_token: str) -> str:
+    async def enable(self, enablement_token: str) -> str | None:
         """Enable the Vestaboard's Local API using a Local API Enablement Token.
 
         If successful, the Vestaboard's Local API key will be returned and the

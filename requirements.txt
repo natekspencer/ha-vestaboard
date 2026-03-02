@@ -4,7 +4,7 @@ numpy
 PyTurboJPEG
 
 # Integration
-pyvbml>=0.3
+pyvbml==0.3.0
 
 # Development
 colorlog

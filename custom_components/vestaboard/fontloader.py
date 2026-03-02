@@ -12,10 +12,16 @@ FONT_NAME: Final = "Vestaboard.otf"
 FONT_EMOJI: Final = "VestaEmojis.ttf"
 FONT_EMOJI_SIZE: Final = 128
 
+_font_cache: dict[str, bytes | None] = {}
+
 
 def _load_font_bytes(name: str = FONT_NAME) -> bytes:
     """Load the raw font bytes from the font file."""
-    return resources.read_binary(__package__, name)
+    global _font_cache
+    if not (_font_bytes := _font_cache.get(name)):
+        _font_bytes = resources.read_binary(__package__, name)
+        _font_cache[name] = _font_bytes
+    return _font_bytes
 
 
 def get_font_buffer(name: str = FONT_NAME) -> io.BytesIO:

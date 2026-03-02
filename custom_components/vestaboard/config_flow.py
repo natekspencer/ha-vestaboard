@@ -163,7 +163,7 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors["base"] = "invalid_host"
             elif status == EndpointStatus.INVALID_API_KEY:
                 errors["base"] = "invalid_api_key"
-            else:
+            elif status == EndpointStatus.VALID:
                 if write:
                     model = VestaboardModel.from_color(COLOR_BLACK, client.data)
                     message = (

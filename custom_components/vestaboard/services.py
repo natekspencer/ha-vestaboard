@@ -138,7 +138,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
             try:
                 rows = coordinator.model.parse_vbml(vbml)
             except Exception as ex:
-                raise HomeAssistantError from ex
+                raise HomeAssistantError(f"Invalid VBML payload: {ex}") from ex
             json["characters"] = rows
 
             if duration := call.data.get(CONF_DURATION):  # This is a temporary message
