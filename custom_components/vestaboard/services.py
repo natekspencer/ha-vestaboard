@@ -17,6 +17,7 @@ from .const import (
     ALIGN_HORIZONTAL,
     ALIGN_VERTICAL,
     CONF_ALIGN,
+    CONF_BYPASS_QUIET_HOURS,
     CONF_DURATION,
     CONF_JUSTIFY,
     CONF_MESSAGE,
@@ -97,6 +98,7 @@ SERVICE_MESSAGE_SCHEMA = vol.All(
             vol.Optional(CONF_DURATION): vol.All(
                 vol.Coerce(int), vol.Range(min=10, max=43200)
             ),
+            vol.Optional(CONF_BYPASS_QUIET_HOURS): cv.boolean,
         },
     ),
     cv.has_at_least_one_key(CONF_MESSAGE, CONF_VBML),
@@ -125,14 +127,14 @@ def async_setup_services(hass: HomeAssistant) -> None:
         json = {}
         if strategy := call.data.get(CONF_STRATEGY):
             json[CONF_STRATEGY] = strategy
-        if step_interval := call.data.get(CONF_STEP_INTERVAL_MS):
-            json[CONF_STEP_INTERVAL_MS] = step_interval
-        if step_size := call.data.get(CONF_STEP_SIZE):
-            json[CONF_STEP_SIZE] = step_size
+            if step_interval := call.data.get(CONF_STEP_INTERVAL_MS):
+                json[CONF_STEP_INTERVAL_MS] = step_interval
+            if step_size := call.data.get(CONF_STEP_SIZE):
+                json[CONF_STEP_SIZE] = step_size
 
         for device_id in call.data[CONF_DEVICE_ID]:
             coordinator = async_get_coordinator_by_device_id(hass, device_id)
-            if coordinator.quiet_hours():
+            if not call.data.get(CONF_BYPASS_QUIET_HOURS) and coordinator.quiet_hours():
                 continue
 
             if coordinator.model is None:
