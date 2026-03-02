@@ -89,3 +89,8 @@ message:
           min: 10
           max: 43200
           unit_of_measurement: seconds
+    bypass_quiet_hours:
+      name: Bypass quiet hours
+      description: Ignore quiet hours setting and send the message to the Vestaboard.
+      selector:
+        boolean:
