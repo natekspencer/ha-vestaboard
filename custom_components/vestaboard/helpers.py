@@ -7,23 +7,15 @@ import io
 import logging
 from typing import TYPE_CHECKING, Any, cast
 
-import httpx
 from PIL import Image, ImageDraw, ImageOps
-from vesta import Color, LocalClient, encode_text
+from pyvbml.character_codes import COLOR_CODES, CharacterCode
 
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
-from homeassistant.util.ssl import get_default_context
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import (
-    ALIGN_CENTER,
-    ALIGN_JUSTIFIED,
-    COLOR_BLACK,
-    CONF_ALIGN,
-    CONF_ENABLEMENT_TOKEN,
-    CONF_JUSTIFY,
-    DOMAIN,
-)
+from .client import DEFAULT_PORT, VestaboardLocalClient
+from .const import COLOR_BLACK, CONF_ENABLEMENT_TOKEN, DOMAIN
 from .fontloader import get_font_bytes, load_emoji_font, load_font
 from .vestaboard_model import (
     BIT_HEIGHT,
@@ -41,42 +33,21 @@ _LOGGER = logging.getLogger(__name__)
 PRINTABLE = (
     " ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890!@#$() - +&=;: '\"%,.  /? °🟥🟧🟨🟩🟦🟪⬜⬛■"
 )
-EMOJI_MAP = {
-    "🟥": "{63}",
-    "🟧": "{64}",
-    "🟨": "{65}",
-    "🟩": "{66}",
-    "🟦": "{67}",
-    "🟪": "{68}",
-    "⬜": "{69}",
-    "⬛": "{70}",
-    "■": "{71}",
-    "❤️": "{62}",
-}
 
 
-def construct_message(message: str, **kwargs: Any) -> list[list[int]]:
-    """Construct a message."""
-    message = "".join(EMOJI_MAP.get(char, char) for char in message)
-    align = kwargs.get(CONF_JUSTIFY, ALIGN_CENTER)
-    if align == ALIGN_JUSTIFIED:
-        align = ALIGN_CENTER
-    valign = kwargs.get(CONF_ALIGN, ALIGN_CENTER)
-    if valign in (ALIGN_CENTER, ALIGN_JUSTIFIED):
-        valign = "middle"
-    return encode_text(message, align=align, valign=valign)
-
-
-def create_client(data: dict[str, Any]) -> LocalClient:
+async def create_client(
+    hass: HomeAssistant, data: dict[str, Any]
+) -> VestaboardLocalClient:
     """Create a Vestaboard local client."""
-    url = f"http://{data['host']}:7000"
-    key = data["api_key"]
-    http_client = httpx.Client(verify=get_default_context())
+    api_key = data.get("api_key")
+    url = f"http://{data['host']}:{DEFAULT_PORT}"
+    session = async_get_clientsession(hass)
+    client = VestaboardLocalClient(base_url=url, session=session)
     if data.get(CONF_ENABLEMENT_TOKEN):
-        client = LocalClient(base_url=url, http_client=http_client)
-        client.enable(key)
-        return client
-    return LocalClient(local_api_key=key, base_url=url, http_client=http_client)
+        await client.enable(api_key)
+    elif api_key:
+        client.api_key = api_key
+    return client
 
 
 def draw_emoji(emoji: str, size: tuple[int, int]) -> Image.Image:
@@ -173,7 +144,7 @@ def create_png(
                     emoji_img,
                 )
 
-            elif code in (c.value for c in Color):
+            elif code in COLOR_CODES:
                 vertical_padding = (font_height - glyph_height) / 2
                 bit_pad = bit_w * 0.02
                 draw.rectangle(
@@ -258,7 +229,8 @@ def create_svg(data: list[list[int]], color: str = COLOR_BLACK) -> str:
     svg += f".board {{ fill: {model.frame_color}; stroke: {model.bit_color}; stroke-width: 0.02; }}"
     svg += f".char {{ font-size: 0.14px; width: 0.09px; height: 0.11px; }} text.char {{ fill: {model.text_color}; transform: translateY(0.105px); }}"
     svg += " ".join(
-        f".{Color(k).name.lower()} {{ fill: {v}; }}" for k, v in model.color_map.items()
+        f".{CharacterCode(k).name.lower()} {{ fill: {v}; }}"
+        for k, v in model.color_map.items()
     )
     svg += f".logo {{ font-size: 0.10px; fill: {model.bit_color}; }} </style>"
     svg += '<rect class="board" x="0.01" y="0.01" width="3.98" height="1.75" />'
@@ -269,8 +241,8 @@ def create_svg(data: list[list[int]], color: str = COLOR_BLACK) -> str:
         for column, code in enumerate(characters):
             xpos = round(start + column * column_multiplier, 3)
             ypos = round(start + row * row_multiplier, 3)
-            if code in (c.value for c in Color):
-                svg += f'<rect class="char {Color(code).name.lower()}" x="{xpos}" y="{ypos}"/>'
+            if code in COLOR_CODES:
+                svg += f'<rect class="char {CharacterCode(code).name.lower()}" x="{xpos}" y="{ypos}"/>'
             else:
                 svg += f'<text class="char" x="{xpos + 0.045}" y="{ypos}">{symbol(code).replace("&", "&amp;")}</text>'
     svg += '<text class="logo" x="50%" y="1.68">VESTABOARD</text></svg>'

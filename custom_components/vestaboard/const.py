@@ -25,7 +25,15 @@ CONF_QUIET_START: Final = "quiet_start"
 CONF_STEP_INTERVAL_MS: Final = "step_interval_ms"
 CONF_STEP_SIZE: Final = "step_size"
 CONF_STRATEGY: Final = "strategy"
-CONF_TRANSITIONS: Final = ["column"]
+CONF_TRANSITIONS: Final = (
+    "classic",
+    "column",
+    "reverse-column",
+    "edges-to-center",
+    "row",
+    "diagonal",
+    "random",
+)
 CONF_VBML: Final = "vbml"
 
 DATA_HASS_CONFIG: Final = "hass_config"
@@ -34,4 +42,3 @@ COLOR_BLACK: Final = "black"
 COLOR_WHITE: Final = "white"
 
 SERVICE_MESSAGE: Final = "message"
-VBML_URL: Final = "https://vbml.vestaboard.com/compose"

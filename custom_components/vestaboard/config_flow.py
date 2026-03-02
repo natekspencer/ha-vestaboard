@@ -7,7 +7,6 @@ import logging
 from typing import Any
 
 from aiohttp import ClientConnectorError
-from httpx import ConnectError, HTTPStatusError
 import voluptuous as vol
 
 from homeassistant.components import dhcp
@@ -21,6 +20,7 @@ from homeassistant.helpers.schema_config_entry_flow import (
 )
 from homeassistant.helpers.selector import TimeSelector
 
+from .client import EndpointStatus
 from .const import (
     COLOR_BLACK,
     COLOR_WHITE,
@@ -30,7 +30,7 @@ from .const import (
     CONF_QUIET_START,
     DOMAIN,
 )
-from .helpers import construct_message, create_client
+from .helpers import create_client
 from .vestaboard_model import VestaboardModel
 
 _LOGGER = logging.getLogger(__name__)
@@ -158,30 +158,28 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
         """Validate client setup."""
         errors = {}
         try:
-            client = await self.hass.async_add_executor_job(
-                create_client, {"host": self.host} | user_input
-            )
-            if not (data := client.read_message()):
+            client = await create_client(self.hass, {"host": self.host} | user_input)
+            if (status := await client.check_endpoint()) == EndpointStatus.UNKNOWN:
+                errors["base"] = "invalid_host"
+            elif status == EndpointStatus.INVALID_API_KEY:
                 errors["base"] = "invalid_api_key"
-            else:
+            elif status == EndpointStatus.VALID:
                 if write:
-                    model = VestaboardModel.from_color(COLOR_BLACK, data)
+                    model = VestaboardModel.from_color(COLOR_BLACK, client.data)
                     message = (
                         VESTABOARD_CONNECTED_MESSAGE
                         if model.is_flagship
                         else VESTABOARD_NOTE_CONNECTED_MESSAGE
                     )
-                    json = {"characters": construct_message("\n".join(message))}
-                    client.write_message(json)
+                    json = {"characters": model.parse_template("\n".join(message))}
+                    await client.write_message(json)
                 self.api_key = client.api_key
+            else:
+                errors["base"] = "unknown"
         except asyncio.TimeoutError:
             errors["base"] = "timeout_connect"
-        except ConnectError:
-            errors["base"] = "invalid_host"
         except ClientConnectorError:
-            errors["base"] = "unknown"
-        except HTTPStatusError as err:
-            errors["base"] = str(err)
+            errors["base"] = "invalid_host"
         except Exception as ex:  # pylint: disable=broad-except
             _LOGGER.error(ex)
             errors["base"] = "unknown"
@@ -197,12 +195,14 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
                 if entry.data[CONF_HOST] == data[CONF_HOST] or entry.data[
                     CONF_API_KEY
                 ] == data.get(CONF_API_KEY):
-                    if not await self.validate_client(user_input, write=False):
+                    if CONF_API_KEY not in data:
+                        data[CONF_API_KEY] = entry.data[CONF_API_KEY]
+                    if not await self.validate_client(data, write=False):
                         return self.async_update_reload_and_abort(
                             entry,
                             unique_id=self.unique_id or entry.unique_id,
                             data_updates={
-                                CONF_HOST: user_input.get(CONF_HOST, self.host),
+                                CONF_HOST: data.get(CONF_HOST, self.host),
                                 CONF_API_KEY: self.api_key,
                             },
                             reason="already_configured",

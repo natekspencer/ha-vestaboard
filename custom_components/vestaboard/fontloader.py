@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from importlib import resources
+from importlib.resources import files
 import io
 from typing import Final
 
@@ -11,11 +11,18 @@ from PIL import ImageFont
 FONT_NAME: Final = "Vestaboard.otf"
 FONT_EMOJI: Final = "VestaEmojis.ttf"
 FONT_EMOJI_SIZE: Final = 128
+FONT_NAMES_ALLOWED: Final = {FONT_NAME, FONT_EMOJI}
+
+_font_cache: dict[str, bytes] = {}
 
 
 def _load_font_bytes(name: str = FONT_NAME) -> bytes:
     """Load the raw font bytes from the font file."""
-    return resources.read_binary(__package__, name)
+    if name not in FONT_NAMES_ALLOWED:
+        raise ValueError(f"Unsupported font resource: {name}")
+    if name not in _font_cache:
+        _font_cache[name] = files(__package__).joinpath(name).read_bytes()
+    return _font_cache[name]
 
 
 def get_font_buffer(name: str = FONT_NAME) -> io.BytesIO:

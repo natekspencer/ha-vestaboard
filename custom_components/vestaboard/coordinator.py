@@ -6,9 +6,6 @@ from datetime import datetime, timedelta
 import logging
 
 import async_timeout
-import httpx
-from vesta import LocalClient
-from vesta.chars import Rows
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant
@@ -16,6 +13,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 import homeassistant.util.dt as dt_util
 
+from .client import InvalidApiKeyError, VestaboardLocalClient
 from .const import COLOR_BLACK, CONF_MODEL, CONF_QUIET_END, CONF_QUIET_START, DOMAIN
 from .helpers import create_png, decode
 from .vestaboard_model import VestaboardModel
@@ -23,27 +21,6 @@ from .vestaboard_model import VestaboardModel
 _LOGGER = logging.getLogger(__name__)
 
 type VestaboardConfigEntry = ConfigEntry[VestaboardCoordinator]
-
-
-def write_message(self: LocalClient, json: dict[str, Rows | str | int]) -> bool:
-    """Write a message to the Vestaboard.
-
-    `json` must be a json object and may contain:
-      - `characters` - a 6x22 array of character codes
-      - `strategy` - column
-      - `step_interval_ms` - step interval in milliseconds
-      - `step_size` - number of columns to animate
-
-    :raises ValueError: if ``characters`` is a list with unsupported dimensions
-    """
-    if not self.enabled:
-        raise RuntimeError("Local API has not been enabled")
-    r = self.http.post("/local-api/message", json=json)
-    r.raise_for_status()
-    return r.status_code == httpx.codes.CREATED
-
-
-LocalClient.write_message = write_message
 
 
 class VestaboardCoordinator(DataUpdateCoordinator):
@@ -65,7 +42,7 @@ class VestaboardCoordinator(DataUpdateCoordinator):
         self,
         hass: HomeAssistant,
         config_entry: VestaboardConfigEntry,
-        vestaboard: LocalClient,
+        vestaboard: VestaboardLocalClient,
     ) -> None:
         """Initialize."""
         super().__init__(
@@ -110,12 +87,12 @@ class VestaboardCoordinator(DataUpdateCoordinator):
         """Fetch data from Vestaboard."""
         try:
             async with async_timeout.timeout(10):
-                data = await self.hass.async_add_executor_job(
-                    self.vestaboard.read_message
-                )
+                data = await self.vestaboard.read_message()
+        except InvalidApiKeyError as err:
+            raise ConfigEntryAuthFailed from err
         except Exception as ex:
             raise UpdateFailed(
-                f"Couldn't read vestaboard at {self.vestaboard.http.base_url.host}"
+                f"Couldn't read vestaboard at {self.vestaboard.base_url}"
             ) from ex
         if data is None:
             raise ConfigEntryAuthFailed
@@ -125,11 +102,18 @@ class VestaboardCoordinator(DataUpdateCoordinator):
 
         return await self.hass.async_add_executor_job(self.process_data, data)
 
-    async def write_and_update_state(self, json: dict[str, Rows | str | int]) -> None:
+    async def write_and_update_state(
+        self, json: dict[str, list[list[int]] | str | int]
+    ) -> None:
         """Write to board and immediately update coordinator."""
-        await self.hass.async_add_executor_job(self.vestaboard.write_message, json)
+        if not await self.vestaboard.write_message(json):
+            raise UpdateFailed(f"Failed to write message to {self.name}")
+
         # Manually update coordinator state for instant UI feedback
-        self.async_set_updated_data(self.process_data(json["characters"]))
+        data = await self.hass.async_add_executor_job(
+            self.process_data, json["characters"]
+        )
+        self.async_set_updated_data(data)
 
     async def _handle_temporary_message_expiration(self, now: datetime) -> None:
         """Handle temporary message expiration."""

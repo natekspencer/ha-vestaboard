@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Final, Self
 
+from pyvbml import vbml
+from pyvbml.types import IVBML, ComponentStyle
+
 MODEL_FLAGSHIP = "flagship"
 MODEL_NOTE = "note"
 COLOR_BLACK = "black"
@@ -230,3 +233,20 @@ class VestaboardModel:
             )
 
         return cls(color, model)
+
+    def parse_template(
+        self, template: str, style: ComponentStyle | None = None
+    ) -> list[list[int]]:
+        """Parse VBML template using the model's size."""
+        return vbml.parse(
+            {
+                "style": {"height": self.rows, "width": self.columns},
+                "components": [{"template": template, "style": style}],
+            }
+        )
+
+    def parse_vbml(self, data: IVBML) -> list[list[int]]:
+        """Parse VBML using the model's size."""
+        # Force array size to match this model
+        data["style"] = {"height": self.rows, "width": self.columns}
+        return vbml.parse(data)
