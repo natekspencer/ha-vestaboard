@@ -1,4 +1,9 @@
-<!-- BEGIN AUTO-GENERATED HEADER -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://brands.home-assistant.io/vestaboard/dark_logo.png">
+  <img alt="Vestaboard logo" src="https://brands.home-assistant.io/vestaboard/logo.png" width="450px">
+</picture>
+
+# Vestaboard for Home Assistant
 
 [![Release](https://img.shields.io/github/v/release/natekspencer/ha-vestaboard?style=for-the-badge)](https://github.com/natekspencer/ha-vestaboard/releases)
 [![HACS Badge](https://img.shields.io/badge/HACS-default-41BDF5.svg?style=for-the-badge)](https://github.com/hacs/integration)
@@ -7,15 +12,6 @@
 
 ![Downloads](https://img.shields.io/github/downloads/natekspencer/ha-vestaboard/total?style=flat-square)
 ![Latest Downloads](https://img.shields.io/github/downloads/natekspencer/ha-vestaboard/latest/total?style=flat-square)
-
-<!-- END AUTO-GENERATED HEADER -->
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://brands.home-assistant.io/vestaboard/dark_logo.png">
-  <img alt="Vestaboard logo" src="https://brands.home-assistant.io/vestaboard/logo.png">
-</picture>
-
-# Vestaboard for Home Assistant
 
 Home Assistant integration for Vestaboard messaging displays.
 
@@ -30,8 +26,6 @@ To use this integration, you **must first request access to Vestaboard's Local A
 3. Once approved, you will receive a token that you'll need to configure this integration.
 
 ⚠️ **Note:** The integration will not function without this token. Be sure to complete this step before proceeding with setup.
-
-<!-- BEGIN AUTO-GENERATED INSTALLATION -->
 
 ## ⬇️ Installation
 
@@ -68,26 +62,17 @@ Alternatively:
 2. In the bottom-right corner, select **Add integration**
 3. Type `Vestaboard` and select the **Vestaboard** integration
 4. Follow the instructions to add the integration to your Home Assistant
-<!-- END AUTO-GENERATED INSTALLATION -->
 
 ## ⚙️ Options
 
-After this integration is set up, you can configure the model of your Vestaboard to adjust the image that is generated.
+After this integration is set up, you can configure the color of your Vestaboard to adjust the image that is generated.
 
-Models:
-
-- Flagship Black
-  ![Flagship Black Connected](images/flagship-black.png)
-- Flagship White
-  ![Flagship White Connected](images/flagship-white.png)
-- Note Black
-  ![Note Black Connected](images/note-black.png)
-- Note White
-  ![Note White Connected](images/note-white.png)
+|          |                                       Black                                       |                                       White                                       |
+| -------- | :-------------------------------------------------------------------------------: | :-------------------------------------------------------------------------------: |
+| Flagship | <img alt="Flagship Black Connected" src="images/flagship-black.png" width="100%"> | <img alt="Flagship White Connected" src="images/flagship-white.png" width="100%"> |
+| Note     |     <img alt="Note Black Connected" src="images/note-black.png" width="70%">      |     <img alt="Note White Connected" src="images/note-white.png" width="70%">      |
 
 ---
-
-<!-- BEGIN AUTO-GENERATED FOOTER -->
 
 ## ❤️ Support Me
 
@@ -106,5 +91,3 @@ If you don't already own a Vestaboard, please consider using my referral link be
 ## 📈 Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=natekspencer/ha-vestaboard)](https://www.star-history.com/#natekspencer/ha-vestaboard)
-
-<!-- END AUTO-GENERATED FOOTER -->
