@@ -135,7 +135,9 @@ class VestaboardCoordinator(DataUpdateCoordinator):
         )
         self.temporary_message_expiration = None
         if rows := self.persistent_message:
-            await self.write_and_update_state({"characters": rows})
+            await self.write_and_update_state(
+                {"characters": rows, **self.default_transition_settings}
+            )
         if self._cancel_cb:
             self._cancel_cb()
             self._cancel_cb = None
