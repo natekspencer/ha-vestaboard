@@ -93,8 +93,8 @@ SERVICE_MESSAGE_SCHEMA = vol.All(
             vol.Optional(CONF_ALIGN, default=ALIGN_CENTER): vol.In(ALIGN_VERTICAL),
             vol.Optional(CONF_VBML): VBML_SCHEMA,
             vol.Optional(CONF_STRATEGY): vol.In(CONF_TRANSITIONS),
-            vol.Optional(CONF_STEP_INTERVAL_MS): cv.positive_int,
             vol.Optional(CONF_STEP_SIZE): cv.positive_int,
+            vol.Optional(CONF_STEP_INTERVAL_MS): cv.positive_int,
             vol.Optional(CONF_DURATION): vol.All(
                 vol.Coerce(int), vol.Range(min=10, max=43200)
             ),
@@ -127,10 +127,10 @@ def async_setup_services(hass: HomeAssistant) -> None:
         json = {}
         if strategy := call.data.get(CONF_STRATEGY):
             json[CONF_STRATEGY] = strategy
-            if step_interval := call.data.get(CONF_STEP_INTERVAL_MS):
-                json[CONF_STEP_INTERVAL_MS] = step_interval
             if step_size := call.data.get(CONF_STEP_SIZE):
                 json[CONF_STEP_SIZE] = step_size
+            if step_interval := call.data.get(CONF_STEP_INTERVAL_MS):
+                json[CONF_STEP_INTERVAL_MS] = step_interval
 
         for device_id in call.data[CONF_DEVICE_ID]:
             coordinator = async_get_coordinator_by_device_id(hass, device_id)
@@ -146,6 +146,9 @@ def async_setup_services(hass: HomeAssistant) -> None:
             except Exception as ex:
                 raise HomeAssistantError(f"Invalid VBML payload: {ex}") from ex
             json["characters"] = rows
+
+            if not json.get(CONF_STRATEGY):
+                json.update(coordinator.default_transition_settings)
 
             if duration := call.data.get(CONF_DURATION):  # This is a temporary message
                 if coordinator._cancel_cb:

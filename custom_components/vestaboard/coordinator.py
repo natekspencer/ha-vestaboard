@@ -14,7 +14,14 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 import homeassistant.util.dt as dt_util
 
 from .client import InvalidApiKeyError, VestaboardLocalClient
-from .const import COLOR_BLACK, CONF_MODEL, CONF_QUIET_END, CONF_QUIET_START, DOMAIN
+from .const import (
+    COLOR_BLACK,
+    CONF_MODEL,
+    CONF_QUIET_END,
+    CONF_QUIET_START,
+    CONF_STRATEGY,
+    DOMAIN,
+)
 from .helpers import create_png, decode
 from .vestaboard_model import VestaboardModel
 
@@ -63,6 +70,11 @@ class VestaboardCoordinator(DataUpdateCoordinator):
             self.quiet_end = dt_util.parse_time(end)
         else:
             self.quiet_start = self.quiet_end = None
+
+    @property
+    def default_transition_settings(self) -> dict[str, str | int]:
+        """Return the default transition strategy settings."""
+        return self.config_entry.options.get(CONF_STRATEGY) or {}
 
     def process_data(self, data: list[list[int]]) -> list[list[int]]:
         """Process data."""
