@@ -69,7 +69,7 @@ message:
       selector:
         number:
           min: 1
-          max: 22
+          max: 132
           unit_of_measurement: columns/rows/bits
       example: 2
     step_interval_ms:

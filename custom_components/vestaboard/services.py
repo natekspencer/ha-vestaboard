@@ -124,15 +124,16 @@ def async_setup_services(hass: HomeAssistant) -> None:
 
             vbml = {"components": components}
 
-        json = {}
+        base_json = {}
         if strategy := call.data.get(CONF_STRATEGY):
-            json[CONF_STRATEGY] = strategy
+            base_json[CONF_STRATEGY] = strategy
             if step_size := call.data.get(CONF_STEP_SIZE):
-                json[CONF_STEP_SIZE] = step_size
+                base_json[CONF_STEP_SIZE] = step_size
             if step_interval := call.data.get(CONF_STEP_INTERVAL_MS):
-                json[CONF_STEP_INTERVAL_MS] = step_interval
+                base_json[CONF_STEP_INTERVAL_MS] = step_interval
 
         for device_id in call.data[CONF_DEVICE_ID]:
+            json = dict(base_json)
             coordinator = async_get_coordinator_by_device_id(hass, device_id)
             if not call.data.get(CONF_BYPASS_QUIET_HOURS) and coordinator.quiet_hours():
                 continue
@@ -147,7 +148,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 raise HomeAssistantError(f"Invalid VBML payload: {ex}") from ex
             json["characters"] = rows
 
-            if not json.get(CONF_STRATEGY):
+            if CONF_STRATEGY not in json:
                 json.update(coordinator.default_transition_settings)
 
             if duration := call.data.get(CONF_DURATION):  # This is a temporary message
