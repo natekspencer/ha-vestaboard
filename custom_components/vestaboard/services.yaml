@@ -4,7 +4,7 @@ message:
   fields:
     device_id:
       name: Device
-      description: The Vestaboard to send the message to.
+      description: Vestaboard to send the message to.
       required: true
       selector:
         device:
@@ -13,7 +13,7 @@ message:
       example: device_id
     message:
       name: Message
-      description: The message to send.
+      description: Message to send.
       selector:
         text:
           multiline: true
@@ -50,7 +50,7 @@ message:
       example: '{ "props": { "hours": "07", "minutes": "35" }, "components": [ { "style": { "justify": "center", "align": "center" }, "template": "{{ ''{{hours}}:{{minutes}}'' }}"}]}'
     strategy:
       name: Transition strategy
-      description: Transition strategy to use.
+      description: Animation style when a new message is sent.
       selector:
         select:
           translation_key: strategy
@@ -63,24 +63,24 @@ message:
             - diagonal
             - random
       example: column
-    step_interval_ms:
-      name: Step interval
-      description: Step interval for the transition.
+    step_size:
+      name: Step size
+      description: Number of columns/rows/bits to animate at the same time. Leave blank to animate one at a time.
       selector:
         number:
-          min: 0
+          min: 1
+          max: 132
+          unit_of_measurement: columns/rows/bits
+      example: 2
+    step_interval_ms:
+      name: Step interval
+      description: Delay between starting each animation step. Leave blank for immediate sequential activation.
+      selector:
+        number:
+          min: 1
           max: 3000
           unit_of_measurement: milliseconds
       example: 500
-    step_size:
-      name: Step size
-      description: Number of columns/bits to animate at the same time for the transition.
-      selector:
-        number:
-          min: 0
-          max: 22
-          unit_of_measurement: columns/bits
-      example: 2
     duration:
       name: Duration
       description: Display the message temporarily. The board will revert to its previous persistent message after the duration expires.

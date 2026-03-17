@@ -13,12 +13,16 @@ from homeassistant.components import dhcp
 from homeassistant.config_entries import ConfigEntry, ConfigFlow
 from homeassistant.const import CONF_API_KEY, CONF_HOST
 from homeassistant.core import callback
-from homeassistant.data_entry_flow import FlowResult
+from homeassistant.data_entry_flow import FlowResult, section
 from homeassistant.helpers.schema_config_entry_flow import (
     SchemaFlowFormStep,
     SchemaOptionsFlowHandler,
 )
-from homeassistant.helpers.selector import TimeSelector
+from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    TimeSelector,
+)
 
 from .client import EndpointStatus
 from .const import (
@@ -28,6 +32,10 @@ from .const import (
     CONF_MODEL,
     CONF_QUIET_END,
     CONF_QUIET_START,
+    CONF_STEP_INTERVAL_MS,
+    CONF_STEP_SIZE,
+    CONF_STRATEGY,
+    CONF_TRANSITIONS,
     DOMAIN,
 )
 from .helpers import create_client
@@ -48,6 +56,26 @@ OPTIONS_SCHEMA = vol.Schema(
         ),
         vol.Optional(CONF_QUIET_START): TimeSelector(),
         vol.Optional(CONF_QUIET_END): TimeSelector(),
+        vol.Optional(CONF_STRATEGY): section(
+            vol.Schema(
+                {
+                    vol.Required(CONF_STRATEGY): vol.In(CONF_TRANSITIONS),
+                    vol.Optional(CONF_STEP_SIZE): NumberSelector(
+                        NumberSelectorConfig(
+                            min=1,
+                            max=132,
+                            step=1,
+                            unit_of_measurement="columns/rows/bits",
+                        )
+                    ),
+                    vol.Optional(CONF_STEP_INTERVAL_MS): NumberSelector(
+                        NumberSelectorConfig(
+                            min=1, max=3000, step=1, unit_of_measurement="milliseconds"
+                        )
+                    ),
+                }
+            )
+        ),
     }
 )
 OPTIONS_FLOW = {"init": SchemaFlowFormStep(OPTIONS_SCHEMA)}

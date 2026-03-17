@@ -40,6 +40,22 @@
           "model": "Select your Vestaboard color to change the image that is generated",
           "quiet_start": "Quiet hours start time",
           "quiet_end": "Quiet hours end time"
+        },
+        "sections": {
+          "strategy": {
+            "name": "Default transition",
+            "description": "Configure the default transition settings for this Vestaboard. Note: This only changes the behavior of this integration.",
+            "data": {
+              "strategy": "Transition strategy",
+              "step_size": "Step size",
+              "step_interval_ms": "Step interval"
+            },
+            "data_description": {
+              "strategy": "Animation style when a new message is sent.",
+              "step_size": "Number of columns/rows/bits to animate at the same time. Leave blank to animate one at a time.",
+              "step_interval_ms": "Delay between starting each animation step. Leave blank for immediate sequential activation."
+            }
+          }
         }
       }
     }
