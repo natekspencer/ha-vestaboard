@@ -72,7 +72,7 @@ After this integration is set up, you can configure the color of your Vestaboard
 | Flagship | <img alt="Flagship Black Connected" src="images/flagship-black.png" width="100%"> | <img alt="Flagship White Connected" src="images/flagship-white.png" width="100%"> |
 | Note     |     <img alt="Note Black Connected" src="images/note-black.png" width="70%">      |     <img alt="Note White Connected" src="images/note-white.png" width="70%">      |
 
-## Actions
+## 🎬 Actions
 
 ### `vestaboard.message` - Send a message to one or more Vestaboards
 
