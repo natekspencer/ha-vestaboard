@@ -5,5 +5,10 @@
         "default": "mdi:sign-text"
       }
     }
+  },
+  "services": {
+    "message": {
+      "service": "mdi:send"
+    }
   }
 }
