@@ -136,6 +136,8 @@ data:
     }
 ```
 
+Note: The outer "{{ }}" escapes the inner VBML template syntax in the example above.
+
 **Send to multiple devices, bypassing quiet hours:**
 
 ```yaml
@@ -150,7 +152,7 @@ data:
 
 ---
 
-### Notes
+#### Notes
 
 - Either `message` or `vbml` should be provided, but not both. `vbml` takes precedence if both are given.
 - `step_size` and `step_interval_ms` only apply when a `strategy` is specified.
