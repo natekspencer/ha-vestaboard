@@ -7,7 +7,7 @@
   "config_flow": true,
   "dhcp": [
     {
-      "macaddress": "4C93A600*"
+      "macaddress": "4C93A6*"
     }
   ],
   "documentation": "https://github.com/natekspencer/ha-vestaboard",

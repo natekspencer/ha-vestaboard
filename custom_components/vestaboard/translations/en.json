@@ -37,9 +37,13 @@
     "step": {
       "init": {
         "data": {
+          "host": "Host",
           "model": "Select your Vestaboard color to change the image that is generated",
           "quiet_start": "Quiet hours start time",
           "quiet_end": "Quiet hours end time"
+        },
+        "data_description": {
+          "host": "Update the IP address or hostname if your Vestaboard has connected on a different network interface and its address has changed."
         },
         "sections": {
           "strategy": {
