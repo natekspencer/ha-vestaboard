@@ -16,7 +16,6 @@ from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult, section
 from homeassistant.helpers.schema_config_entry_flow import (
     SchemaFlowFormStep,
-    SchemaOptionsFlowHandler,
 )
 from homeassistant.helpers.selector import (
     NumberSelector,
@@ -106,7 +105,9 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
 
     @staticmethod
     @callback
-    def async_get_options_flow(config_entry: ConfigEntry) -> VestaboardOptionsFlowHandler:
+    def async_get_options_flow(
+        config_entry: ConfigEntry,
+    ) -> VestaboardOptionsFlowHandler:
         """Get the options flow for this handler."""
         return VestaboardOptionsFlowHandler()
 
