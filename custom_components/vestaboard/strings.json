@@ -19,6 +19,14 @@
           "api_key": "[%key:common::config_flow::data::api_key%]",
           "enablement_token": "The API key provided is an enablement token and should be used to request a new API key from the board. If you have already performed this step in the past, here or elsewhere, it is strongly encouraged that you use the existing API key. Otherwise, any attempt to read or write with old API keys will fail."
         }
+      },
+      "reconfigure": {
+        "data": {
+          "host": "[%key:common::config_flow::data::host%]"
+        },
+        "data_description": {
+          "host": "Update the IP address or hostname if your Vestaboard has connected on a different network interface and its address has changed."
+        }
       }
     },
     "error": {
@@ -30,7 +38,8 @@
     },
     "abort": {
       "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
-      "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]"
+      "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]",
+      "reconfigure_successful": "[%key:common::config_flow::abort::reconfigure_successful%]"
     }
   },
   "options": {

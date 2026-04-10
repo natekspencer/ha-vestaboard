@@ -106,7 +106,9 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
 
     @staticmethod
     @callback
-    def async_get_options_flow(config_entry: ConfigEntry) -> SchemaOptionsFlowHandler:
+    def async_get_options_flow(
+        config_entry: ConfigEntry,
+    ) -> SchemaOptionsFlowHandler:
         """Get the options flow for this handler."""
         return SchemaOptionsFlowHandler(config_entry, OPTIONS_FLOW)
 
@@ -116,6 +118,39 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
         self.name = discovery_info.hostname
         await self.async_set_unique_id(discovery_info.macaddress)
         self._abort_if_unique_id_configured(updates={CONF_HOST: self.host})
+
+        # The board may have reconnected on a different network interface (e.g.
+        # switching between 2.4 GHz and 5 GHz), giving it a different MAC and
+        # therefore a different unique_id than the one stored on the config entry.
+        # Try each existing entry's API key against the new IP; if it responds,
+        # this is the same board and we can silently update the stored host.
+        for entry in self._async_current_entries():
+            try:
+                client = await create_client(
+                    self.hass,
+                    {CONF_HOST: self.host, CONF_API_KEY: entry.data[CONF_API_KEY]},
+                )
+                if await client.check_endpoint() == EndpointStatus.VALID:
+                    return self.async_update_reload_and_abort(
+                        entry,
+                        data_updates={CONF_HOST: self.host},
+                        reason="already_configured",
+                    )
+            except asyncio.CancelledError:
+                raise
+            except (
+                ClientConnectorError,
+                asyncio.TimeoutError,
+                OSError,
+                ValueError,
+            ) as ex:
+                _LOGGER.debug(
+                    "Failed to probe entry %s at %s during DHCP discovery: %s",
+                    entry.entry_id,
+                    self.host,
+                    ex,
+                )
+
         return await self.async_step_api_key()
 
     async def async_step_user(
@@ -143,6 +178,36 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Perform reauth upon an API key error."""
         return await self._async_step("reauth_confirm", STEP_API_KEY_SCHEMA, user_input)
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle reconfiguration to update the host."""
+        reconfigure_entry = self._get_reconfigure_entry()
+        errors = {}
+
+        if user_input is not None:
+            self.host = user_input[CONF_HOST]
+            self.api_key = reconfigure_entry.data[CONF_API_KEY]
+            if not (
+                errors := await self.validate_client(
+                    {CONF_API_KEY: self.api_key}, write=False
+                )
+            ):
+                return self.async_update_reload_and_abort(
+                    reconfigure_entry,
+                    data_updates={CONF_HOST: self.host},
+                    reason="reconfigure_successful",
+                )
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=self.add_suggested_values_to_schema(
+                vol.Schema({vol.Required(CONF_HOST): str}),
+                {CONF_HOST: reconfigure_entry.data[CONF_HOST]},
+            ),
+            errors=errors,
+        )
 
     async def _async_step(
         self, step_id: str, schema: vol.Schema, user_input: dict[str, Any] | None = None
