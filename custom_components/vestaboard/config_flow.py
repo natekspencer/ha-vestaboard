@@ -136,7 +136,14 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
                         data_updates={CONF_HOST: self.host},
                         reason="already_configured",
                     )
-            except Exception as ex:  # pylint: disable=broad-except
+            except asyncio.CancelledError:
+                raise
+            except (
+                ClientConnectorError,
+                asyncio.TimeoutError,
+                OSError,
+                ValueError,
+            ) as ex:
                 _LOGGER.debug(
                     "Failed to probe entry %s at %s during DHCP discovery: %s",
                     entry.entry_id,
