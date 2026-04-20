@@ -66,5 +66,9 @@ class VestaboardSensorEntity(VestaboardEntity, SensorEntity):
         """Return entity specific state attributes."""
         if self.entity_description.key == "message" and (data := self.coordinator.data):
             character_codes = "".join(f"{{{code}}}" for row in data for code in row)
-            return {"character_codes": character_codes}
+            attrs: dict[str, Any] = {"character_codes": character_codes}
+            if (board_model := self.coordinator.model) is not None:
+                attrs["model"] = board_model.model
+                attrs["color"] = board_model.color
+            return attrs
         return None

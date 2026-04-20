@@ -72,6 +72,24 @@ After this integration is set up, you can configure the color of your Vestaboard
 | Flagship | <img alt="Flagship Black Connected" src="images/flagship-black.png" width="100%"> | <img alt="Flagship White Connected" src="images/flagship-white.png" width="100%"> |
 | Note     |     <img alt="Note Black Connected" src="images/note-black.png" width="70%">      |     <img alt="Note White Connected" src="images/note-white.png" width="70%">      |
 
+## 📊 Entities
+
+Each Vestaboard device exposes the following sensor entities:
+
+### `sensor.<name>_message` - Current board message
+
+Tracks the message currently displayed on the board. Updated every 15 seconds.
+
+| Attribute | Type | Description |
+| --------- | ---- | ----------- |
+| `character_codes` | string | All cell codes as a flat `{N}` sequence, row by row (e.g. `{0}{63}{27}...`). 132 values for Flagship, 45 for Note. |
+| `model` | string | Board model: `flagship` (6×22) or `note` (3×15). |
+| `color` | string | Board color scheme: `black` or `white`. |
+
+These attributes are useful for reading the current board state programmatically — for example, to load it into a composer UI or back it up before sending a temporary message.
+
+---
+
 ## 🎬 Actions
 
 ### `vestaboard.message` - Send a message to one or more Vestaboards
