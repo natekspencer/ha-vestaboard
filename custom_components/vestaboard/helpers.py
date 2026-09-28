@@ -255,7 +255,7 @@ def decode(data: list[int] | list[list[int]]) -> None:
     ``data`` may be a single list or a two-dimensional array of character codes.
     """
     rows = cast(list[list[int]], data if data and isinstance(data[0], list) else [data])
-    return "\n".join((f"{''.join(map(symbol, row))}" for row in rows))
+    return "\n".join(f"{''.join(map(symbol, row))}" for row in rows)
 
 
 def symbol(code: int) -> str:
