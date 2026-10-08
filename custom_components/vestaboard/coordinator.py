@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta
 import logging
-
-import async_timeout
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant
@@ -98,7 +97,7 @@ class VestaboardCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self):
         """Fetch data from Vestaboard."""
         try:
-            async with async_timeout.timeout(10):
+            async with asyncio.timeout(10):
                 data = await self.vestaboard.read_message()
         except InvalidApiKeyError as err:
             raise ConfigEntryAuthFailed from err
