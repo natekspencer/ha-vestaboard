@@ -18,6 +18,21 @@ BIT_HEIGHT = 2 + 1 / 32
 BIT_WIDTH_SPACING = 29 / 64
 BIT_HEIGHT_SPACING = 55 / 64
 
+# Without a frame, the margin around the bits matches the spacing between them
+FRAMELESS_MARGIN = BIT_WIDTH_SPACING
+
+
+def frameless_width(columns: int) -> float:
+    """Return the physical width of a grid of bits plus margin, in inches."""
+    bits = columns * BIT_WIDTH + (columns - 1) * BIT_WIDTH_SPACING
+    return bits + 2 * FRAMELESS_MARGIN
+
+
+def frameless_height(rows: int) -> float:
+    """Return the physical height of a grid of bits plus margin, in inches."""
+    bits = rows * BIT_HEIGHT + (rows - 1) * BIT_HEIGHT_SPACING
+    return bits + 2 * FRAMELESS_MARGIN
+
 
 @dataclass(frozen=True)
 class ColorTheme:
@@ -104,6 +119,8 @@ class VestaboardModel:
 
     color: str
     model: str
+    has_frame: bool = True
+    """Whether the board is drawn with its frame and logo, or as bits only."""
 
     def __post_init__(self) -> None:
         """Validate color and model."""
@@ -160,27 +177,35 @@ class VestaboardModel:
     @property
     def width(self) -> float:
         """Return the physical width of the board, in inches."""
+        if not self.has_frame:
+            return frameless_width(self.columns)
         return MODELS[self.model].width
 
     @property
     def height(self) -> float:
         """Return the physical height of the board, in inches."""
+        if not self.has_frame:
+            return frameless_height(self.rows)
         return MODELS[self.model].height
 
     @property
     def frame_border(self) -> float:
-        """Return the physical frame border, in inches."""
+        """Return the physical frame border, or margin when frameless, in inches."""
+        if not self.has_frame:
+            return FRAMELESS_MARGIN
         return MODELS[self.model].frame_border
 
     @property
     def frame_thickness(self) -> float:
         """Return the physical frame thickness, in inches."""
+        if not self.has_frame:
+            return 0
         return MODELS[self.model].frame_thickness
 
     @property
     def aspect_ratio(self) -> float:
         """Return the aspect ratio."""
-        return MODELS[self.model].width / MODELS[self.model].height
+        return self.width / self.height
 
     @property
     def is_flagship(self) -> bool:
@@ -219,7 +244,9 @@ class VestaboardModel:
         return list(COLOR_SCHEMES.keys())
 
     @classmethod
-    def from_color(cls, color: str, data: list[list[int]] | None = None) -> Self:
+    def from_color(
+        cls, color: str, data: list[list[int]] | None = None, has_frame: bool = True
+    ) -> Self:
         """Factory with validation to return Vestaboard model based on color and size."""
         if data is None:
             model = MODEL_FLAGSHIP
@@ -232,7 +259,7 @@ class VestaboardModel:
                 f"Unknown Vestaboard model: {model or f'{size[0]}x{size[1]}'} {color!r}"
             )
 
-        return cls(color, model)
+        return cls(color, model, has_frame)
 
     def parse_template(
         self, template: str, style: ComponentStyle | None = None

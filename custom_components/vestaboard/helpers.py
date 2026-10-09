@@ -80,9 +80,10 @@ def create_png(
     color: str = COLOR_BLACK,
     height: int = 1080,
     draw_bit: bool = True,
+    model: VestaboardModel | None = None,
 ) -> bytes:
     """Create a png of the message on a Vestaboard."""
-    return _to_png(render_board(data, color, height, draw_bit))
+    return _to_png(render_board(data, color, height, draw_bit, model))
 
 
 def _to_png(img: Image.Image) -> bytes:
@@ -97,9 +98,11 @@ def render_board(
     color: str = COLOR_BLACK,
     height: int = 1080,
     draw_bit: bool = True,
+    model: VestaboardModel | None = None,
 ) -> Image.Image:
     """Render the message on a Vestaboard as an image."""
-    model = VestaboardModel.from_color(color, data)
+    if model is None:
+        model = VestaboardModel.from_color(color, data)
 
     #  Physical scale
     px_per_in = height / model.height
@@ -112,11 +115,12 @@ def render_board(
 
     # Board background
     outer_border = model.frame_thickness * px_per_in
-    draw.rectangle(
-        [(0, 0), (width, height)],
-        outline=model.bit_color,
-        width=int(outer_border),
-    )
+    if outer_border:
+        draw.rectangle(
+            [(0, 0), (width, height)],
+            outline=model.bit_color,
+            width=int(outer_border),
+        )
 
     inner_border = model.frame_border * px_per_in
 
@@ -199,7 +203,22 @@ def render_board(
                     anchor="mm",
                 )
 
-    # logo placement
+    if model.has_frame:
+        _draw_logo(draw, model, start_y, bit_h, gap_y, inner_border, width)
+
+    return img
+
+
+def _draw_logo(
+    draw: ImageDraw.ImageDraw,
+    model: VestaboardModel,
+    start_y: float,
+    bit_h: float,
+    gap_y: float,
+    inner_border: float,
+    width: int,
+) -> None:
+    """Draw the logo centered in the frame below the bits."""
     logo_text = "VESTABOARD"
     logo_font = load_font(int(bit_h * 0.3))
 
@@ -222,8 +241,6 @@ def render_board(
         anchor="md",
         font=logo_font,
     )
-
-    return img
 
 
 def create_svg(data: list[list[int]], color: str = COLOR_BLACK) -> str:

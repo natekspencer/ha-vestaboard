@@ -19,6 +19,7 @@ from .const import (
     CONF_MODEL,
     CONF_QUIET_END,
     CONF_QUIET_START,
+    CONF_SHOW_FRAME,
     CONF_STRATEGY,
     DOMAIN,
 )
@@ -93,10 +94,14 @@ class VestaboardCoordinator(DataUpdateCoordinator):
         """Process data."""
         if data != self.data:
             if self.model is None:
-                self.model = VestaboardModel.from_color(self.model_color, data)
+                self.model = VestaboardModel.from_color(
+                    self.model_color,
+                    data,
+                    has_frame=self.config_entry.options.get(CONF_SHOW_FRAME, True),
+                )
             self.last_updated = dt_util.now()
             self.message = decode(data)
-            self.image = create_png(data, self.model_color)
+            self.image = create_png(data, self.model_color, model=self.model)
         return data
 
     def quiet_hours(self) -> bool:

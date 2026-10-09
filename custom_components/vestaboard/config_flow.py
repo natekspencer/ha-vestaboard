@@ -32,6 +32,7 @@ from .const import (
     CONF_MODEL,
     CONF_QUIET_END,
     CONF_QUIET_START,
+    CONF_SHOW_FRAME,
     CONF_STEP_INTERVAL_MS,
     CONF_STEP_SIZE,
     CONF_STRATEGY,
@@ -78,7 +79,10 @@ OPTIONS_SCHEMA = vol.Schema(
         ),
     }
 )
-OPTIONS_FLOW = {"init": SchemaFlowFormStep(OPTIONS_SCHEMA)}
+BOARD_OPTIONS_SCHEMA = OPTIONS_SCHEMA.extend(
+    {vol.Optional(CONF_SHOW_FRAME, default=True): bool}
+)
+OPTIONS_FLOW = {"init": SchemaFlowFormStep(BOARD_OPTIONS_SCHEMA)}
 
 VESTABOARD_CONNECTED_MESSAGE = [
     "{63}{63}{63}{63}{63}{63}{64}{64}{64}{64}{64}{64}{64}{64}{64}{65}{65}{65}{65}{65}{65}{65}",
