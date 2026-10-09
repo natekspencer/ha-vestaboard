@@ -26,6 +26,7 @@ from .coordinator import (
     VestaboardArrayCoordinator,
     VestaboardConfigEntry,
     VestaboardCoordinator,
+    entry_reload_key,
 )
 from .helpers import create_client, get_entry_type, is_array_entry
 from .repairs import (
@@ -47,6 +48,8 @@ PLATFORMS = [
     Platform.BUTTON,
     Platform.IMAGE,
     Platform.SENSOR,
+    Platform.SWITCH,
+    Platform.TIME,
 ]
 
 
@@ -245,5 +248,14 @@ async def async_unload_entry(hass: HomeAssistant, entry: VestaboardConfigEntry) 
 
 
 async def update_listener(hass: HomeAssistant, entry: VestaboardConfigEntry) -> None:
-    """Handle options update."""
+    """Handle options update.
+
+    Quiet hours changes, e.g. from the quiet hours entities, apply without a
+    reload; anything else reloads the entry.
+    """
+    coordinator = entry.runtime_data
+    if entry_reload_key(entry) == coordinator.reload_key:
+        coordinator.apply_quiet_hours(entry.options)
+        coordinator.async_update_listeners()
+        return
     await hass.config_entries.async_reload(entry.entry_id)

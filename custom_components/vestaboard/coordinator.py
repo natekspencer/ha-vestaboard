@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import datetime, time, timedelta
 import logging
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
@@ -21,6 +22,7 @@ from .const import (
     CONF_LAYOUT,
     CONF_MODEL,
     CONF_QUIET_END,
+    CONF_QUIET_HOURS,
     CONF_QUIET_START,
     CONF_SHOW_FRAME,
     CONF_STRATEGY,
@@ -39,17 +41,40 @@ type VestaboardConfigEntry = ConfigEntry[
 ARRAY_REFRESH_COOLDOWN = 0.5
 
 
-def _parse_quiet_hours(
-    options: dict,
-) -> tuple[time | None, time | None]:
-    """Parse quiet hours start and end from config entry options."""
-    if (start := options.get(CONF_QUIET_START)) != (end := options.get(CONF_QUIET_END)):
-        return dt_util.parse_time(start), dt_util.parse_time(end)
-    return None, None
+# Options the quiet hours entities change without reloading the entry
+QUIET_HOURS_OPTIONS = (CONF_QUIET_HOURS, CONF_QUIET_START, CONF_QUIET_END)
+
+
+def entry_reload_key(entry: ConfigEntry) -> tuple:
+    """Return what an entry must be reloaded for if it changes.
+
+    That's everything except quiet hours, which apply without a reload.
+    """
+    options = {
+        key: value
+        for key, value in entry.options.items()
+        if key not in QUIET_HOURS_OPTIONS
+    }
+    return entry.title, dict(entry.data), options
+
+
+def quiet_hours_enabled(options: Mapping[str, Any]) -> bool:
+    """Return whether quiet hours are turned on.
+
+    Before the quiet hours switch existed, quiet hours were on whenever start
+    and end were set to different times.
+    """
+    if (enabled := options.get(CONF_QUIET_HOURS)) is not None:
+        return enabled
+    start, end = options.get(CONF_QUIET_START), options.get(CONF_QUIET_END)
+    return bool(start and end and start != end)
 
 
 def _in_quiet_hours(start: time | None, end: time | None) -> bool:
-    """Check if the current time is within quiet hours."""
+    """Check if the current time is within quiet hours.
+
+    Equal start and end times mean quiet all day.
+    """
     if start and end:
         now = dt_util.now().time()
         if start < end:
@@ -58,7 +83,28 @@ def _in_quiet_hours(start: time | None, end: time | None) -> bool:
     return False
 
 
-class VestaboardCoordinator(DataUpdateCoordinator):
+class QuietHoursMixin:
+    """Quiet hours settings, shared by board and array coordinators."""
+
+    quiet_start: time | None = None
+    quiet_end: time | None = None
+    quiet_hours_enabled: bool = False
+
+    def apply_quiet_hours(self, options: Mapping[str, Any]) -> None:
+        """Apply quiet hours settings from config entry options."""
+        start, end = options.get(CONF_QUIET_START), options.get(CONF_QUIET_END)
+        self.quiet_start = dt_util.parse_time(start) if start else None
+        self.quiet_end = dt_util.parse_time(end) if end else None
+        self.quiet_hours_enabled = quiet_hours_enabled(options)
+
+    def _in_own_quiet_hours(self) -> bool:
+        """Check if this coordinator's own quiet hours are active now."""
+        return self.quiet_hours_enabled and _in_quiet_hours(
+            self.quiet_start, self.quiet_end
+        )
+
+
+class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
     """Vestaboard data update coordinator."""
 
     config_entry: VestaboardConfigEntry
@@ -97,7 +143,8 @@ class VestaboardCoordinator(DataUpdateCoordinator):
 
         self.model: VestaboardModel | None = None
         self.model_color = config_entry.options.get(CONF_MODEL, COLOR_BLACK)
-        self.quiet_start, self.quiet_end = _parse_quiet_hours(config_entry.options)
+        self.apply_quiet_hours(config_entry.options)
+        self.reload_key = entry_reload_key(config_entry)
 
     @property
     def firmware_version(self) -> str | None:
@@ -125,7 +172,7 @@ class VestaboardCoordinator(DataUpdateCoordinator):
 
     def quiet_hours(self) -> bool:
         """Check if quiet hours."""
-        return _in_quiet_hours(self.quiet_start, self.quiet_end)
+        return self._in_own_quiet_hours()
 
     async def _async_update_data(self):
         """Fetch data from Vestaboard."""
@@ -264,7 +311,9 @@ class VestaboardCoordinator(DataUpdateCoordinator):
             )
 
 
-class VestaboardArrayCoordinator(DataUpdateCoordinator[list[list[int]]]):
+class VestaboardArrayCoordinator(
+    QuietHoursMixin, DataUpdateCoordinator[list[list[int]]]
+):
     """Coordinator for a grid of Vestaboards acting as one larger virtual board.
 
     The array holds no connection of its own. It references the config entries
@@ -292,7 +341,8 @@ class VestaboardArrayCoordinator(DataUpdateCoordinator[list[list[int]]]):
             ),
         )
         self.layout: list[list[str]] = config_entry.data[CONF_LAYOUT]
-        self.quiet_start, self.quiet_end = _parse_quiet_hours(config_entry.options)
+        self.apply_quiet_hours(config_entry.options)
+        self.reload_key = entry_reload_key(config_entry)
         self.model: VestaboardArrayModel | None = None
 
     @property
@@ -406,7 +456,7 @@ class VestaboardArrayCoordinator(DataUpdateCoordinator[list[list[int]]]):
 
     def quiet_hours(self) -> bool:
         """Check if quiet hours for the array or any of its loaded member boards."""
-        if _in_quiet_hours(self.quiet_start, self.quiet_end):
+        if self._in_own_quiet_hours():
             return True
         for entry_id in self.member_entry_ids:
             entry = self.hass.config_entries.async_get_entry(entry_id)

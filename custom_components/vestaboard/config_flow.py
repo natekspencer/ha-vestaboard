@@ -37,7 +37,6 @@ from homeassistant.helpers.selector import (
     SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
-    TimeSelector,
 )
 import homeassistant.util.dt as dt_util
 
@@ -56,8 +55,6 @@ from .const import (
     CONF_JUSTIFY,
     CONF_LAYOUT,
     CONF_MODEL,
-    CONF_QUIET_END,
-    CONF_QUIET_START,
     CONF_SHOW_FRAME,
     CONF_STEP_INTERVAL_MS,
     CONF_STEP_SIZE,
@@ -95,8 +92,6 @@ OPTIONS_SCHEMA = vol.Schema(
         vol.Required(CONF_MODEL, default=COLOR_BLACK): vol.In(
             {COLOR_BLACK: "Black", COLOR_WHITE: "White"}
         ),
-        vol.Optional(CONF_QUIET_START): TimeSelector(),
-        vol.Optional(CONF_QUIET_END): TimeSelector(),
         vol.Optional(CONF_STRATEGY): section(
             vol.Schema(
                 {

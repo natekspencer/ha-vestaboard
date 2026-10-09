@@ -86,8 +86,6 @@
       "init": {
         "data": {
           "model": "Select your Vestaboard color to change the image that is generated",
-          "quiet_start": "Quiet hours start time",
-          "quiet_end": "Quiet hours end time",
           "show_frame": "Show frame"
         },
         "sections": {
@@ -129,6 +127,19 @@
       },
       "message": {
         "name": "Message"
+      }
+    },
+    "switch": {
+      "quiet_hours": {
+        "name": "Quiet hours"
+      }
+    },
+    "time": {
+      "quiet_start": {
+        "name": "Quiet hours start"
+      },
+      "quiet_end": {
+        "name": "Quiet hours end"
       }
     }
   },
