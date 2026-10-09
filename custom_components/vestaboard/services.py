@@ -9,7 +9,6 @@ import voluptuous as vol
 from homeassistant.const import CONF_DEVICE_ID
 from homeassistant.core import HomeAssistant, HomeAssistantError, ServiceCall, callback
 from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers.event import async_track_point_in_time
 from homeassistant.util.dt import now as dt_now
 
 from .const import (
@@ -151,20 +150,10 @@ def async_setup_services(hass: HomeAssistant) -> None:
             if CONF_STRATEGY not in json:
                 json.update(coordinator.default_transition_settings)
 
+            expiration = None
             if duration := call.data.get(CONF_DURATION):  # This is a temporary message
-                if coordinator._cancel_cb:
-                    coordinator._cancel_cb()
                 expiration = dt_now() + timedelta(seconds=duration)
-                coordinator.temporary_message_expiration = expiration
-                await coordinator.write_and_update_state(json)
-                coordinator._cancel_cb = async_track_point_in_time(
-                    hass, coordinator._handle_temporary_message_expiration, expiration
-                )
-            else:
-                coordinator.persistent_message = rows
-                expiration = coordinator.temporary_message_expiration
-                if not (expiration and expiration > dt_now()):
-                    await coordinator.write_and_update_state(json)
+            await coordinator.async_write_message(json, expiration)
 
     hass.services.async_register(
         DOMAIN,
