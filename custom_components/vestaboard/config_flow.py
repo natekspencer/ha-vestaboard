@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import timedelta
+from datetime import datetime, timedelta
 import logging
 from typing import Any
 
@@ -278,18 +278,34 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
     array_rows: int = 0
     array_columns: int = 0
     array_boards: list[str]
-    identified_boards: list[str] | None = None
+    # Notes showing their name, each with the temporary message it was showing
+    # before (characters and expiration), if any
+    identified_boards: dict[str, tuple[list[list[int]], datetime] | None] | None = None
+    identify_expiration: datetime | None = None
 
     @callback
     def async_remove(self) -> None:
-        """Restore any Notes showing their name once the flow ends, however it ends."""
-        for entry_id in self.identified_boards or ():
+        """Restore any Notes showing their name once the flow ends, however it ends.
+
+        A Note goes back to the temporary message it was showing before, if that
+        hasn't expired, or else to its persistent message. A Note that was sent
+        a newer temporary message during the flow is left alone.
+        """
+        for entry_id, previous in (self.identified_boards or {}).items():
             entry = self.hass.config_entries.async_get_entry(entry_id)
-            if entry is not None and entry.state is ConfigEntryState.LOADED:
-                self.hass.async_create_task(
-                    entry.runtime_data.async_clear_temporary_message(),
-                    f"vestaboard restore {entry.title}",
+            if entry is None or entry.state is not ConfigEntryState.LOADED:
+                continue
+            coordinator = entry.runtime_data
+            if coordinator.temporary_message_expiration != self.identify_expiration:
+                continue
+            if previous and previous[1] > dt_util.now():
+                characters, expiration = previous
+                restore = coordinator.async_write_message(
+                    {"characters": characters}, expiration
                 )
+            else:
+                restore = coordinator.async_clear_temporary_message()
+            self.hass.async_create_task(restore, f"vestaboard restore {entry.title}")
 
     @staticmethod
     @callback
@@ -523,10 +539,15 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
         case the flow is abandoned without being closed.
         """
         expiration = dt_util.now() + IDENTIFY_DURATION
-        self.identified_boards = []
+        self.identify_expiration = expiration
+        self.identified_boards = {}
         for entry_id in _async_get_array_candidates(self.hass):
             entry = self.hass.config_entries.async_get_entry(entry_id)
             coordinator = entry.runtime_data
+            previous = None
+            current = coordinator.temporary_message_expiration
+            if current and current > dt_util.now() and coordinator.data:
+                previous = ([list(row) for row in coordinator.data], current)
             try:
                 characters = coordinator.model.parse_template(
                     _async_board_label(self.hass, entry_id).upper(),
@@ -541,7 +562,7 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
                     "Unable to show its name on %s", entry.title, exc_info=True
                 )
                 continue
-            self.identified_boards.append(entry_id)
+            self.identified_boards[entry_id] = previous
 
     async def async_step_api_key(
         self, user_input: dict[str, Any] | None = None

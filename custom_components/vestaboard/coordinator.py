@@ -372,10 +372,18 @@ class VestaboardArrayCoordinator(DataUpdateCoordinator[list[list[int]]]):
                 )
 
     def quiet_hours(self) -> bool:
-        """Check if quiet hours for the array or any of its member boards."""
-        return _in_quiet_hours(self.quiet_start, self.quiet_end) or any(
-            member.quiet_hours() for row in self.members() for member in row
-        )
+        """Check if quiet hours for the array or any of its loaded member boards."""
+        if _in_quiet_hours(self.quiet_start, self.quiet_end):
+            return True
+        for entry_id in self.member_entry_ids:
+            entry = self.hass.config_entries.async_get_entry(entry_id)
+            if (
+                entry is not None
+                and entry.state is ConfigEntryState.LOADED
+                and entry.runtime_data.quiet_hours()
+            ):
+                return True
+        return False
 
     def process_data(self, data: list[list[int]]) -> list[list[int]]:
         """Process data."""
