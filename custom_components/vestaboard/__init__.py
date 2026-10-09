@@ -46,11 +46,19 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: VestaboardConfigEntry) -> bool:
     """Set up Vestaboard from a config entry."""
+    store = None
     if get_entry_type(entry) == ENTRY_TYPE_VIRTUAL:
-        client = await _async_create_virtual_client(hass, entry)
+        store = _virtual_store(hass, entry)
+        saved = (await store.async_load() or {}).get("message")
+        board = VestaboardModel(COLOR_BLACK, entry.data[CONF_BOARD_MODEL])
+        client = VestaboardVirtualClient(
+            entry.title, board.rows, board.columns, message=saved
+        )
     else:
         client = await create_client(hass, entry.data)
     coordinator = VestaboardCoordinator(hass, entry, client)
+    if store is not None:
+        _async_save_virtual_message(entry, coordinator, store, saved)
     await coordinator.async_config_entry_first_refresh()
 
     if not coordinator.data:
@@ -70,25 +78,31 @@ def _virtual_store(hass: HomeAssistant, entry: VestaboardConfigEntry) -> Store:
     return Store(hass, VIRTUAL_STORAGE_VERSION, f"{DOMAIN}.virtual_{entry.entry_id}")
 
 
-async def _async_create_virtual_client(
-    hass: HomeAssistant, entry: VestaboardConfigEntry
-) -> VestaboardVirtualClient:
-    """Create a virtual board client, restoring its last message."""
-    board = VestaboardModel(COLOR_BLACK, entry.data[CONF_BOARD_MODEL])
-    store = _virtual_store(hass, entry)
-    stored = await store.async_load() or {}
+@callback
+def _async_save_virtual_message(
+    entry: VestaboardConfigEntry,
+    coordinator: VestaboardCoordinator,
+    store: Store,
+    saved: list[list[int]] | None,
+) -> None:
+    """Save a virtual board's persistent message whenever it changes.
+
+    A temporary message showing at shutdown isn't saved, so the board comes
+    back with its persistent message. Any pending save is written on unload,
+    so a reload loads the latest message and a removal can't be undone by a
+    late write.
+    """
+    latest = {"message": saved}
 
     @callback
-    def _async_save(message: list[list[int]]) -> None:
+    def _async_persistent_message_changed(message: list[list[int]]) -> None:
+        if message == latest["message"]:
+            return
+        latest["message"] = message
         store.async_delay_save(lambda: {"message": message}, VIRTUAL_SAVE_DELAY)
 
-    return VestaboardVirtualClient(
-        entry.title,
-        board.rows,
-        board.columns,
-        message=stored.get("message"),
-        on_write=_async_save,
-    )
+    coordinator.on_persistent_message = _async_persistent_message_changed
+    entry.async_on_unload(lambda: store.async_save(dict(latest)))
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: VestaboardConfigEntry) -> None:
