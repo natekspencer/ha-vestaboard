@@ -77,6 +77,8 @@ class VestaboardCoordinator(DataUpdateCoordinator):
             update_interval=timedelta(seconds=15),
         )
         self.vestaboard = vestaboard
+        # Serializes temporary message writes, expirations and clears
+        self._temporary_message_lock = asyncio.Lock()
 
         self.model: VestaboardModel | None = None
         self.model_color = config_entry.options.get(CONF_MODEL, COLOR_BLACK)
@@ -143,37 +145,58 @@ class VestaboardCoordinator(DataUpdateCoordinator):
         A persistent message written while a temporary message is showing is
         held until the temporary message expires.
         """
-        if expiration:
-            if self._cancel_cb:
-                self._cancel_cb()
-            self.temporary_message_expiration = expiration
-            await self.write_and_update_state(json)
-            self._cancel_cb = async_track_point_in_time(
-                self.hass, self._handle_temporary_message_expiration, expiration
-            )
-        else:
-            self.persistent_message = json["characters"]
-            current = self.temporary_message_expiration
-            if not (current and current > dt_util.now()):
-                await self.write_and_update_state(json)
+        async with self._temporary_message_lock:
+            if expiration:
+                # Set before writing, so a refresh during the write doesn't take
+                # the temporary message as the persistent one; restore on failure
+                previous = self.temporary_message_expiration
+                self.temporary_message_expiration = expiration
+                try:
+                    await self.write_and_update_state(json)
+                except Exception:
+                    self.temporary_message_expiration = previous
+                    raise
+                if self._cancel_cb:
+                    self._cancel_cb()
+                self._cancel_cb = async_track_point_in_time(
+                    self.hass, self._handle_temporary_message_expiration, expiration
+                )
+            else:
+                self.persistent_message = json["characters"]
+                current = self.temporary_message_expiration
+                if not (current and current > dt_util.now()):
+                    await self.write_and_update_state(json)
 
     async def async_clear_temporary_message(self) -> None:
         """Clear an active temporary message, reverting to the persistent message."""
-        expiration = self.temporary_message_expiration
-        if expiration and expiration > (now := dt_util.now()):
-            await self._handle_temporary_message_expiration(now)
+        async with self._temporary_message_lock:
+            expiration = self.temporary_message_expiration
+            if expiration and expiration > dt_util.now():
+                await self._async_revert_to_persistent_message()
 
     async def _handle_temporary_message_expiration(self, now: datetime) -> None:
         """Handle temporary message expiration."""
-        _LOGGER.debug(
-            "Vestaboard temporary message expired @ %s, reverting to persistent message",
-            now,
-        )
+        async with self._temporary_message_lock:
+            expiration = self.temporary_message_expiration
+            if expiration and expiration > now:
+                # A newer temporary message replaced this one while waiting
+                return
+            _LOGGER.debug(
+                "Vestaboard temporary message expired @ %s, reverting to persistent message",
+                now,
+            )
+            await self._async_revert_to_persistent_message()
+
+    async def _async_revert_to_persistent_message(self) -> None:
+        """Replace the temporary message with the persistent message.
+
+        Must be called with the temporary message lock held.
+        """
+        if self._cancel_cb:
+            self._cancel_cb()
+            self._cancel_cb = None
         self.temporary_message_expiration = None
         if rows := self.persistent_message:
             await self.write_and_update_state(
                 {"characters": rows, **self.default_transition_settings}
             )
-        if self._cancel_cb:
-            self._cancel_cb()
-            self._cancel_cb = None

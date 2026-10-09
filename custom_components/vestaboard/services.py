@@ -131,10 +131,6 @@ def async_setup_services(hass: HomeAssistant) -> None:
             if step_interval := call.data.get(CONF_STEP_INTERVAL_MS):
                 base_json[CONF_STEP_INTERVAL_MS] = step_interval
 
-        expiration = None
-        if duration := call.data.get(CONF_DURATION):  # This is a temporary message
-            expiration = dt_now() + timedelta(seconds=duration)
-
         for device_id in call.data[CONF_DEVICE_ID]:
             json = dict(base_json)
             coordinator = async_get_coordinator_by_device_id(hass, device_id)
@@ -154,6 +150,9 @@ def async_setup_services(hass: HomeAssistant) -> None:
             if CONF_STRATEGY not in json:
                 json.update(coordinator.default_transition_settings)
 
+            expiration = None
+            if duration := call.data.get(CONF_DURATION):  # This is a temporary message
+                expiration = dt_now() + timedelta(seconds=duration)
             await coordinator.async_write_message(json, expiration)
 
     hass.services.async_register(
