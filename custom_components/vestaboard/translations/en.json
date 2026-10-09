@@ -48,7 +48,8 @@
         "data": {
           "model": "Select your Vestaboard color to change the image that is generated",
           "quiet_start": "Quiet hours start time",
-          "quiet_end": "Quiet hours end time"
+          "quiet_end": "Quiet hours end time",
+          "show_frame": "Show frame"
         },
         "sections": {
           "strategy": {
@@ -65,6 +66,9 @@
               "step_interval_ms": "Delay between starting each animation step. Leave blank for immediate sequential activation."
             }
           }
+        },
+        "data_description": {
+          "show_frame": "Draw the image with the Vestaboard's frame and logo. When off, only the bits are drawn, edge to edge."
         }
       }
     }
