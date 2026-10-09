@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from enum import StrEnum
 import json
 import logging
@@ -188,3 +189,59 @@ class VestaboardLocalClient:
         """Close the underlying session if owned by the client."""
         if self.should_close:
             await self.session.close()
+
+
+class VestaboardVirtualClient:
+    """An in-memory stand-in for :py:class:`VestaboardLocalClient`.
+
+    A virtual Vestaboard has no hardware behind it, which makes it useful for
+    trying out messages and arrays. Messages written to it are held in memory;
+    pass ``on_write`` to also save them elsewhere, and ``message`` to start with
+    a saved message.
+    """
+
+    firmware_version: str | None = None
+
+    def __init__(
+        self,
+        name: str,
+        rows: int,
+        columns: int,
+        message: list[list[int]] | None = None,
+        on_write: Callable[[list[list[int]]], None] | None = None,
+    ) -> None:
+        self.base_url = f"virtual://{name}"
+        self.data: list[list[int]] = [[0] * columns for _ in range(rows)]
+        self.on_write = on_write
+        if message is not None and self._fits(message):
+            self.data = [list(row) for row in message]
+
+    def __repr__(self):
+        return f"{type(self).__name__}(base_url={self.base_url!r})"
+
+    async def read_message(self, **kwargs) -> list[list[int]]:
+        """Read the virtual board's current message."""
+        return [list(row) for row in self.data]
+
+    async def write_message(
+        self, json: dict[str, str | int | list[list[int]]], **kwargs
+    ) -> bool:
+        """Write a message to the virtual board. Transition settings are ignored."""
+        characters = json["characters"]
+        if not self._fits(characters):
+            raise ValueError(
+                f"Expected {len(self.data)}x{len(self.data[0])} characters for {self!r}"
+            )
+        self.data = [list(row) for row in characters]
+        if self.on_write:
+            self.on_write(self.data)
+        return True
+
+    def _fits(self, characters: list[list[int]]) -> bool:
+        """Return True if the characters are the size of this board."""
+        return len(characters) == len(self.data) and all(
+            len(row) == len(self.data[0]) for row in characters
+        )
+
+    async def close(self) -> None:
+        """Nothing to close for a virtual board."""

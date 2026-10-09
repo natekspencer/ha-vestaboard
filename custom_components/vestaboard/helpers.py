@@ -10,12 +10,19 @@ from typing import TYPE_CHECKING, Any, cast
 from PIL import Image, ImageDraw, ImageOps
 from pyvbml.character_codes import COLOR_CODES, CharacterCode
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .client import DEFAULT_PORT, VestaboardLocalClient
-from .const import COLOR_BLACK, CONF_ENABLEMENT_TOKEN, DOMAIN
+from .const import (
+    COLOR_BLACK,
+    CONF_ENABLEMENT_TOKEN,
+    CONF_ENTRY_TYPE,
+    DOMAIN,
+    ENTRY_TYPE_DEVICE,
+)
 from .fontloader import get_font_bytes, load_emoji_font, load_font
 from .vestaboard_model import (
     BIT_HEIGHT,
@@ -33,6 +40,11 @@ _LOGGER = logging.getLogger(__name__)
 PRINTABLE = (
     " ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890!@#$() - +&=;: '\"%,.  /? °🟥🟧🟨🟩🟦🟪⬜⬛■"
 )
+
+
+def get_entry_type(entry: ConfigEntry) -> str:
+    """Return the config entry type: a physical device or a virtual board."""
+    return entry.data.get(CONF_ENTRY_TYPE, ENTRY_TYPE_DEVICE)
 
 
 async def create_client(

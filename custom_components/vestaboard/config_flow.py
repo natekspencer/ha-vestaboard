@@ -11,7 +11,7 @@ import voluptuous as vol
 
 from homeassistant.components import dhcp
 from homeassistant.config_entries import ConfigEntry, ConfigFlow
-from homeassistant.const import CONF_API_KEY, CONF_HOST
+from homeassistant.const import CONF_API_KEY, CONF_HOST, CONF_NAME
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult, section
 from homeassistant.helpers.schema_config_entry_flow import (
@@ -21,6 +21,8 @@ from homeassistant.helpers.schema_config_entry_flow import (
 from homeassistant.helpers.selector import (
     NumberSelector,
     NumberSelectorConfig,
+    SelectSelector,
+    SelectSelectorConfig,
     TimeSelector,
 )
 
@@ -28,7 +30,9 @@ from .client import EndpointStatus
 from .const import (
     COLOR_BLACK,
     COLOR_WHITE,
+    CONF_BOARD_MODEL,
     CONF_ENABLEMENT_TOKEN,
+    CONF_ENTRY_TYPE,
     CONF_MODEL,
     CONF_QUIET_END,
     CONF_QUIET_START,
@@ -38,9 +42,11 @@ from .const import (
     CONF_STRATEGY,
     CONF_TRANSITIONS,
     DOMAIN,
+    ENTRY_TYPE_DEVICE,
+    ENTRY_TYPE_VIRTUAL,
 )
-from .helpers import create_client
-from .vestaboard_model import VestaboardModel
+from .helpers import create_client, get_entry_type
+from .vestaboard_model import MODEL_FLAGSHIP, MODEL_NOTE, VestaboardModel
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -49,6 +55,17 @@ STEP_API_KEY_SCHEMA = vol.Schema(
 )
 STEP_USER_DATA_SCHEMA = vol.Schema({vol.Required(CONF_HOST): str}).extend(
     STEP_API_KEY_SCHEMA.schema
+)
+STEP_VIRTUAL_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_NAME, default="Virtual Vestaboard"): str,
+        vol.Required(CONF_BOARD_MODEL, default=MODEL_FLAGSHIP): SelectSelector(
+            SelectSelectorConfig(
+                options=[MODEL_FLAGSHIP, MODEL_NOTE],
+                translation_key=CONF_BOARD_MODEL,
+            )
+        ),
+    }
 )
 OPTIONS_SCHEMA = vol.Schema(
     {
@@ -128,7 +145,7 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
         # therefore a different unique_id than the one stored on the config entry.
         # Try each existing entry's API key against the new IP; if it responds,
         # this is the same board and we can silently update the stored host.
-        for entry in self._async_current_entries():
+        for entry in self._async_device_entries():
             try:
                 client = await create_client(
                     self.hass,
@@ -163,7 +180,28 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Handle the initial step."""
-        return await self._async_step("user", STEP_USER_DATA_SCHEMA, user_input)
+        return self.async_show_menu(step_id="user", menu_options=["device", "virtual"])
+
+    async def async_step_device(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle setting up a single Vestaboard."""
+        return await self._async_step("device", STEP_USER_DATA_SCHEMA, user_input)
+
+    async def async_step_virtual(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle setting up a virtual Vestaboard, which has no hardware behind it."""
+        if user_input is not None:
+            return self.async_create_entry(
+                title=user_input[CONF_NAME],
+                data={
+                    CONF_ENTRY_TYPE: ENTRY_TYPE_VIRTUAL,
+                    CONF_BOARD_MODEL: user_input[CONF_BOARD_MODEL],
+                },
+            )
+
+        return self.async_show_form(step_id="virtual", data_schema=STEP_VIRTUAL_SCHEMA)
 
     async def async_step_api_key(
         self, user_input: dict[str, Any] | None = None
@@ -190,6 +228,8 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Handle reconfiguration to update the host."""
         reconfigure_entry = self._get_reconfigure_entry()
+        if (entry_type := get_entry_type(reconfigure_entry)) != ENTRY_TYPE_DEVICE:
+            return self.async_abort(reason=f"{entry_type}_reconfigure_unsupported")
         errors = {}
 
         if user_input is not None:
@@ -293,7 +333,7 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
         """Abort if configured."""
         if self.host or user_input:
             data = {CONF_HOST: self.host, **(user_input or {})}
-            for entry in self._async_current_entries():
+            for entry in self._async_device_entries():
                 if entry.data[CONF_HOST] == data[CONF_HOST] or entry.data[
                     CONF_API_KEY
                 ] == data.get(CONF_API_KEY):
@@ -312,3 +352,12 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
                             reason="already_configured",
                         )
         return None
+
+    @callback
+    def _async_device_entries(self) -> list[ConfigEntry]:
+        """Return config entries for physical Vestaboards."""
+        return [
+            entry
+            for entry in self._async_current_entries()
+            if get_entry_type(entry) == ENTRY_TYPE_DEVICE
+        ]

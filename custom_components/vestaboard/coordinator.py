@@ -13,7 +13,7 @@ from homeassistant.helpers.event import async_track_point_in_time
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 import homeassistant.util.dt as dt_util
 
-from .client import InvalidApiKeyError, VestaboardLocalClient
+from .client import InvalidApiKeyError, VestaboardLocalClient, VestaboardVirtualClient
 from .const import (
     COLOR_BLACK,
     CONF_MODEL,
@@ -67,7 +67,7 @@ class VestaboardCoordinator(DataUpdateCoordinator):
         self,
         hass: HomeAssistant,
         config_entry: VestaboardConfigEntry,
-        vestaboard: VestaboardLocalClient,
+        vestaboard: VestaboardLocalClient | VestaboardVirtualClient,
     ) -> None:
         """Initialize."""
         super().__init__(

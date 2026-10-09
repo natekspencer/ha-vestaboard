@@ -2,10 +2,25 @@
   "config": {
     "step": {
       "user": {
+        "title": "Add Vestaboard",
+        "menu_options": {
+          "device": "Add a Vestaboard",
+          "virtual": "Create a virtual Vestaboard"
+        }
+      },
+      "device": {
         "data": {
           "host": "[%key:common::config_flow::data::host%]",
           "api_key": "[%key:common::config_flow::data::api_key%]",
           "enablement_token": "The API key provided is an enablement token and should be used to request a new API key from the board. If you have already performed this step in the past, here or elsewhere, it is strongly encouraged that you use the existing API key. Otherwise, any attempt to read or write with old API keys will fail."
+        }
+      },
+      "virtual": {
+        "title": "Create a virtual Vestaboard",
+        "description": "A virtual Vestaboard behaves like a real one in Home Assistant, but has no hardware behind it. Use it to try out messages without any hardware.",
+        "data": {
+          "name": "[%key:common::config_flow::data::name%]",
+          "board_model": "Model"
         }
       },
       "api_key": {
@@ -39,7 +54,8 @@
     "abort": {
       "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
       "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]",
-      "reconfigure_successful": "[%key:common::config_flow::abort::reconfigure_successful%]"
+      "reconfigure_successful": "[%key:common::config_flow::abort::reconfigure_successful%]",
+      "virtual_reconfigure_unsupported": "Virtual Vestaboards have no connection settings to reconfigure."
     }
   },
   "options": {
@@ -119,6 +135,12 @@
         "row": "Row (top-to-bottom)",
         "diagonal": "Diagonal (top left corner to bottom right corner)",
         "random": "Random bits"
+      }
+    },
+    "board_model": {
+      "options": {
+        "flagship": "Vestaboard Flagship (6 x 22)",
+        "note": "Vestaboard Note (3 x 15)"
       }
     }
   },
