@@ -28,7 +28,11 @@ from .coordinator import (
     VestaboardCoordinator,
 )
 from .helpers import create_client, get_entry_type, is_array_entry
-from .repairs import ISSUE_ARRAY_MISSING_BOARD
+from .repairs import (
+    ISSUE_ARRAY_BOARD_DISABLED,
+    ISSUE_ARRAY_MISSING_BOARD,
+    array_issue_id,
+)
 from .services import async_setup_services
 from .vestaboard_model import VestaboardModel
 
@@ -98,22 +102,26 @@ async def _async_setup_array_entry(
 ) -> bool:
     """Set up a Vestaboard array from a config entry."""
     coordinator = VestaboardArrayCoordinator(hass, entry)
-    for entry_id in coordinator.member_entry_ids:
-        if (member := hass.config_entries.async_get_entry(entry_id)) is None:
-            ir.async_create_issue(
-                hass,
-                DOMAIN,
-                _missing_board_issue_id(entry.entry_id),
-                is_fixable=True,
-                severity=ir.IssueSeverity.ERROR,
-                translation_key=ISSUE_ARRAY_MISSING_BOARD,
-                data={"entry_id": entry.entry_id},
-                translation_placeholders={"array": entry.title},
-            )
-            raise ConfigEntryError(
-                "A Vestaboard in this array has been deleted. "
-                "Reconfigure or delete this array."
-            )
+    members = [
+        hass.config_entries.async_get_entry(entry_id)
+        for entry_id in coordinator.member_entry_ids
+    ]
+    if None in members:
+        _async_create_array_issue(hass, entry, ISSUE_ARRAY_MISSING_BOARD)
+        raise ConfigEntryError(
+            "A Vestaboard in this array has been deleted. "
+            "Reconfigure or delete this array."
+        )
+    if disabled := [member.title for member in members if member.disabled_by]:
+        boards = ", ".join(disabled)
+        _async_create_array_issue(
+            hass, entry, ISSUE_ARRAY_BOARD_DISABLED, {"boards": boards}
+        )
+        raise ConfigEntryError(
+            f"{boards} in this array is disabled. "
+            "Enable it, or reconfigure or delete this array."
+        )
+    for member in members:
         if member.state is not ConfigEntryState.LOADED:
             raise ConfigEntryNotReady(f"Waiting for Vestaboard {member.title}")
 
@@ -121,7 +129,7 @@ async def _async_setup_array_entry(
 
     entry.runtime_data = coordinator
     coordinator.async_setup_member_listeners()
-    ir.async_delete_issue(hass, DOMAIN, _missing_board_issue_id(entry.entry_id))
+    _async_delete_array_issues(hass, entry)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -173,21 +181,47 @@ def _async_reload_arrays_with_member(hass: HomeAssistant, entry_id: str) -> None
                 ConfigEntryState.LOADED,
                 ConfigEntryState.SETUP_IN_PROGRESS,
                 ConfigEntryState.SETUP_RETRY,
+                # Failed setup because this board was disabled
+                ConfigEntryState.SETUP_ERROR,
             )
             and any(entry_id in row for row in entry.data[CONF_LAYOUT])
         ):
             hass.config_entries.async_schedule_reload(entry.entry_id)
 
 
-def _missing_board_issue_id(array_entry_id: str) -> str:
-    """Return the repair issue id for an array that has lost a board."""
-    return f"{ISSUE_ARRAY_MISSING_BOARD}_{array_entry_id}"
+@callback
+def _async_create_array_issue(
+    hass: HomeAssistant,
+    entry: VestaboardConfigEntry,
+    issue: str,
+    placeholders: dict[str, str] | None = None,
+) -> None:
+    """Raise a fixable repair issue for an array that can't be set up."""
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        array_issue_id(issue, entry.entry_id),
+        is_fixable=True,
+        severity=ir.IssueSeverity.ERROR,
+        translation_key=issue,
+        data={"entry_id": entry.entry_id},
+        translation_placeholders={"array": entry.title, **(placeholders or {})},
+    )
+
+
+@callback
+def _async_delete_array_issues(
+    hass: HomeAssistant, entry: VestaboardConfigEntry
+) -> None:
+    """Delete an array's repair issues."""
+    for issue in (ISSUE_ARRAY_MISSING_BOARD, ISSUE_ARRAY_BOARD_DISABLED):
+        ir.async_delete_issue(hass, DOMAIN, array_issue_id(issue, entry.entry_id))
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: VestaboardConfigEntry) -> None:
     """Handle removal of a config entry."""
     if is_array_entry(entry):
-        ir.async_delete_issue(hass, DOMAIN, _missing_board_issue_id(entry.entry_id))
+        _async_delete_array_issues(hass, entry)
         return
 
     if get_entry_type(entry) == ENTRY_TYPE_VIRTUAL:

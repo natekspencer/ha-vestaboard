@@ -196,6 +196,30 @@
           "reconfigure": "Continue reconfiguring the array."
         }
       }
+    },
+    "array_board_disabled": {
+      "title": "{array} has a disabled Vestaboard",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "{array} has a disabled Vestaboard",
+            "description": "**{boards}** is disabled, so **{array}** can no longer show messages.\n\nEnable **{boards}** again, reconfigure **{array}** to use a different Note, or delete **{array}**.",
+            "menu_options": {
+              "enable": "Enable {boards}",
+              "reconfigure": "Reconfigure {array}",
+              "delete": "Delete {array}"
+            }
+          },
+          "delete": {
+            "title": "Delete {array}",
+            "description": "**{array}** will be deleted. Its Vestaboards aren't affected."
+          }
+        },
+        "abort": {
+          "array_not_found": "This array no longer exists.",
+          "reconfigure": "Continue reconfiguring the array."
+        }
+      }
     }
   }
 }

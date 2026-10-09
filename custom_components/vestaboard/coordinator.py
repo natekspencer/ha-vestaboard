@@ -349,8 +349,18 @@ class VestaboardArrayCoordinator(DataUpdateCoordinator[list[list[int]]]):
 
         @callback
         def _handle_member_state_change() -> None:
-            # Mark the array unavailable if a member is disabled or fails. A member
-            # that is reloading or deleted triggers an array reload instead.
+            # Reload if a member was disabled, so setup raises a repair issue.
+            # Otherwise refresh, which marks the array unavailable if a member
+            # failed; a member that is reloading or deleted reloads the array.
+            if any(
+                (member_entry := self.hass.config_entries.async_get_entry(entry_id))
+                and member_entry.disabled_by
+                for entry_id in self.member_entry_ids
+            ):
+                self.hass.config_entries.async_schedule_reload(
+                    self.config_entry.entry_id
+                )
+                return
             self.config_entry.async_create_background_task(
                 self.hass, self.async_request_refresh(), "vestaboard_array_refresh"
             )
