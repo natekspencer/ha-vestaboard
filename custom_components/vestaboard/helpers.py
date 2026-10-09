@@ -81,6 +81,24 @@ def create_png(
     height: int = 1080,
     draw_bit: bool = True,
 ) -> bytes:
+    """Create a png of the message on a Vestaboard."""
+    return _to_png(render_board(data, color, height, draw_bit))
+
+
+def _to_png(img: Image.Image) -> bytes:
+    """Encode an image as png."""
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def render_board(
+    data: list[list[int]],
+    color: str = COLOR_BLACK,
+    height: int = 1080,
+    draw_bit: bool = True,
+) -> Image.Image:
+    """Render the message on a Vestaboard as an image."""
     model = VestaboardModel.from_color(color, data)
 
     #  Physical scale
@@ -205,9 +223,7 @@ def create_png(
         font=logo_font,
     )
 
-    buffer = io.BytesIO()
-    img.save(buffer, format="PNG")
-    return buffer.getvalue()
+    return img
 
 
 def create_svg(data: list[list[int]], color: str = COLOR_BLACK) -> str:
