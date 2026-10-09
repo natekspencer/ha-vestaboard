@@ -48,16 +48,17 @@ _random_colors = vol.Schema(
     {vol.Optional("colors"): [vol.All(int, vol.Range(min=63, max=71))]}
 )
 _raw_characters = vol.All(cv.ensure_list, [vol.All(cv.ensure_list, [_character_codes])])
+# Upper bounds depend on the target board or array size and are enforced when parsing
 _style = vol.Schema(
     {
-        vol.Optional("height"): vol.All(vol.Coerce(int), vol.Range(min=1, max=6)),
-        vol.Optional("width"): vol.All(vol.Coerce(int), vol.Range(min=1, max=22)),
+        vol.Optional("height"): vol.All(vol.Coerce(int), vol.Range(min=1)),
+        vol.Optional("width"): vol.All(vol.Coerce(int), vol.Range(min=1)),
         vol.Optional(CONF_JUSTIFY): vol.In(ALIGN_HORIZONTAL),
         vol.Optional(CONF_ALIGN): vol.In(ALIGN_VERTICAL),
         vol.Optional("absolutePosition"): vol.Schema(
             {
-                vol.Required("x"): vol.All(vol.Coerce(int), vol.Range(min=0, max=21)),
-                vol.Required("y"): vol.All(vol.Coerce(int), vol.Range(min=0, max=5)),
+                vol.Required("x"): vol.All(vol.Coerce(int), vol.Range(min=0)),
+                vol.Required("y"): vol.All(vol.Coerce(int), vol.Range(min=0)),
             }
         ),
     }

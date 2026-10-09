@@ -7,9 +7,10 @@ from collections.abc import Callable
 from datetime import datetime, time, timedelta
 import logging
 
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import CALLBACK_TYPE, HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
+from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.event import async_track_point_in_time
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 import homeassistant.util.dt as dt_util
@@ -17,6 +18,7 @@ import homeassistant.util.dt as dt_util
 from .client import InvalidApiKeyError, VestaboardLocalClient, VestaboardVirtualClient
 from .const import (
     COLOR_BLACK,
+    CONF_LAYOUT,
     CONF_MODEL,
     CONF_QUIET_END,
     CONF_QUIET_START,
@@ -24,15 +26,22 @@ from .const import (
     CONF_STRATEGY,
     DOMAIN,
 )
-from .helpers import create_png, decode
-from .vestaboard_model import VestaboardModel
+from .helpers import create_framed_array_png, create_png, decode
+from .vestaboard_model import VestaboardArrayModel, VestaboardModel
 
 _LOGGER = logging.getLogger(__name__)
 
-type VestaboardConfigEntry = ConfigEntry[VestaboardCoordinator]
+type VestaboardConfigEntry = ConfigEntry[
+    VestaboardCoordinator | VestaboardArrayCoordinator
+]
+
+# Coalesce member board updates (e.g. after writing to every board) into one refresh
+ARRAY_REFRESH_COOLDOWN = 0.5
 
 
-def _parse_quiet_hours(options: dict) -> tuple[time | None, time | None]:
+def _parse_quiet_hours(
+    options: dict,
+) -> tuple[time | None, time | None]:
     """Parse quiet hours start and end from config entry options."""
     if (start := options.get(CONF_QUIET_START)) != (end := options.get(CONF_QUIET_END)):
         return dt_util.parse_time(start), dt_util.parse_time(end)
@@ -87,6 +96,11 @@ class VestaboardCoordinator(DataUpdateCoordinator):
         self.model: VestaboardModel | None = None
         self.model_color = config_entry.options.get(CONF_MODEL, COLOR_BLACK)
         self.quiet_start, self.quiet_end = _parse_quiet_hours(config_entry.options)
+
+    @property
+    def firmware_version(self) -> str | None:
+        """Return the firmware version."""
+        return self.vestaboard.firmware_version
 
     @property
     def default_transition_settings(self) -> dict[str, str | int]:
@@ -215,3 +229,203 @@ class VestaboardCoordinator(DataUpdateCoordinator):
             await self.write_and_update_state(
                 {"characters": rows, **self.default_transition_settings}
             )
+
+
+class VestaboardArrayCoordinator(DataUpdateCoordinator[list[list[int]]]):
+    """Coordinator for a grid of Vestaboards acting as one larger virtual board.
+
+    The array holds no connection of its own. It references the config entries
+    of its member boards and reads from/writes to them via their coordinators.
+    """
+
+    config_entry: VestaboardConfigEntry
+
+    last_updated: datetime | None = None
+    message: str | None = None
+    image: bytes | None = None
+
+    def __init__(
+        self, hass: HomeAssistant, config_entry: VestaboardConfigEntry
+    ) -> None:
+        """Initialize."""
+        super().__init__(
+            hass,
+            _LOGGER,
+            config_entry=config_entry,
+            name=f"{DOMAIN}_array",
+            update_interval=None,
+            request_refresh_debouncer=Debouncer(
+                hass, _LOGGER, cooldown=ARRAY_REFRESH_COOLDOWN, immediate=False
+            ),
+        )
+        self.layout: list[list[str]] = config_entry.data[CONF_LAYOUT]
+        self.quiet_start, self.quiet_end = _parse_quiet_hours(config_entry.options)
+        self.model: VestaboardArrayModel | None = None
+
+    @property
+    def member_entry_ids(self) -> list[str]:
+        """Return the config entry ids of every member board."""
+        return [entry_id for row in self.layout for entry_id in row]
+
+    @property
+    def firmware_version(self) -> str | None:
+        """Return the firmware version."""
+        return None
+
+    @property
+    def default_transition_settings(self) -> dict[str, str | int]:
+        """Return the default transition strategy settings."""
+        return self.config_entry.options.get(CONF_STRATEGY) or {}
+
+    @property
+    def temporary_message_expiration(self) -> datetime | None:
+        """Return the latest temporary message expiration across member boards."""
+        try:
+            members = self.members()
+        except HomeAssistantError:
+            return None
+        expirations = [
+            expiration
+            for row in members
+            for member in row
+            if (expiration := member.temporary_message_expiration)
+        ]
+        return max(expirations, default=None)
+
+    def members(self) -> list[list[VestaboardCoordinator]]:
+        """Return the member board coordinators in grid layout.
+
+        Members are looked up on every call so that a reloaded member board
+        is always referenced by its current coordinator.
+        """
+        grid: list[list[VestaboardCoordinator]] = []
+        for row in self.layout:
+            grid_row: list[VestaboardCoordinator] = []
+            for entry_id in row:
+                entry = self.hass.config_entries.async_get_entry(entry_id)
+                if entry is None or entry.state is not ConfigEntryState.LOADED:
+                    name = entry.title if entry else entry_id
+                    raise HomeAssistantError(
+                        f"Vestaboard {name} in array {self.config_entry.title} is not available"
+                    )
+                grid_row.append(entry.runtime_data)
+            grid.append(grid_row)
+        return grid
+
+    def _member_reloading(self) -> bool:
+        """Return True if any member board is part way through a reload."""
+        for entry_id in self.member_entry_ids:
+            if (entry := self.hass.config_entries.async_get_entry(entry_id)) is None:
+                continue
+            if entry.state in (
+                ConfigEntryState.UNLOAD_IN_PROGRESS,
+                ConfigEntryState.SETUP_IN_PROGRESS,
+            ):
+                return True
+            if entry.state is ConfigEntryState.NOT_LOADED and not entry.disabled_by:
+                return True
+        return False
+
+    @callback
+    def async_setup_member_listeners(self) -> None:
+        """Refresh the array whenever any member board updates."""
+
+        @callback
+        def _handle_member_update() -> None:
+            # A member that is unloading will trigger an array reload once it's back
+            try:
+                self.members()
+            except HomeAssistantError:
+                return
+            self.config_entry.async_create_background_task(
+                self.hass, self.async_request_refresh(), "vestaboard_array_refresh"
+            )
+
+        for row in self.members():
+            for member in row:
+                self.config_entry.async_on_unload(
+                    member.async_add_listener(_handle_member_update)
+                )
+
+        @callback
+        def _handle_member_state_change() -> None:
+            # Mark the array unavailable if a member is disabled or fails. A member
+            # that is reloading or deleted triggers an array reload instead.
+            self.config_entry.async_create_background_task(
+                self.hass, self.async_request_refresh(), "vestaboard_array_refresh"
+            )
+
+        for entry_id in self.member_entry_ids:
+            if member_entry := self.hass.config_entries.async_get_entry(entry_id):
+                self.config_entry.async_on_unload(
+                    member_entry.async_on_state_change(_handle_member_state_change)
+                )
+
+    def quiet_hours(self) -> bool:
+        """Check if quiet hours for the array or any of its member boards."""
+        return _in_quiet_hours(self.quiet_start, self.quiet_end) or any(
+            member.quiet_hours() for row in self.members() for member in row
+        )
+
+    def process_data(self, data: list[list[int]]) -> list[list[int]]:
+        """Process data."""
+        if data != self.data:
+            self.last_updated = dt_util.now()
+            self.message = decode(data)
+            if self.config_entry.options.get(CONF_SHOW_FRAME, False):
+                self.image = create_framed_array_png(
+                    self.model.split(data), self.model.colors
+                )
+            else:
+                self.image = create_png(data, model=self.model)
+        return data
+
+    async def _async_update_data(self) -> list[list[int]]:
+        """Combine the current data of every member board."""
+        try:
+            members = self.members()
+        except HomeAssistantError as err:
+            if self.data is not None and self._member_reloading():
+                # The array is reloaded once the member is back, so hold the last state
+                return self.data
+            raise UpdateFailed(str(err)) from err
+
+        if self.model is None:
+            board = members[0][0].model
+            if board is None:
+                raise UpdateFailed("Vestaboard model is not initialized")
+            # Each board keeps its own color; a member's color change reloads it,
+            # which reloads the array and picks up the new color here
+            self.model = VestaboardArrayModel(
+                board.model,
+                tuple(tuple(member.model_color for member in row) for row in members),
+            )
+
+        data = self.model.join([[member.data for member in row] for row in members])
+        return await self.hass.async_add_executor_job(self.process_data, data)
+
+    async def async_write_message(
+        self,
+        json: dict[str, list[list[int]] | str | int],
+        expiration: datetime | None = None,
+    ) -> None:
+        """Split a message across the member boards and write to all at once."""
+        members = self.members()
+        tiles = self.model.split(json["characters"])
+        await asyncio.gather(
+            *(
+                member.async_write_message({**json, "characters": tile}, expiration)
+                for member_row, tile_row in zip(members, tiles)
+                for member, tile in zip(member_row, tile_row)
+            )
+        )
+
+    async def async_clear_temporary_message(self) -> None:
+        """Clear active temporary messages on every member board."""
+        await asyncio.gather(
+            *(
+                member.async_clear_temporary_message()
+                for row in self.members()
+                for member in row
+            )
+        )

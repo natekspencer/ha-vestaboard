@@ -207,6 +207,10 @@ class VestaboardModel:
         """Return the aspect ratio."""
         return self.width / self.height
 
+    def board_at(self, row: int, column: int) -> VestaboardModel:
+        """Return the board that a bit belongs to, which is always this board."""
+        return self
+
     @property
     def is_flagship(self) -> bool:
         """Return True if this is a flagship model (6 rows x 22 columns)."""
@@ -277,3 +281,168 @@ class VestaboardModel:
         # Force array size to match this model
         data["style"] = {"height": self.rows, "width": self.columns}
         return vbml.parse(data)
+
+
+@dataclass(frozen=True, slots=True)
+class VestaboardArrayModel:
+    """A grid of same-model Vestaboards acting as one larger virtual board.
+
+    Each board keeps its own color, so an array can mix black and white boards.
+    """
+
+    model: str
+    colors: tuple[tuple[str, ...], ...]
+    """The color of each board in the grid, by grid row then grid column."""
+
+    def __post_init__(self) -> None:
+        """Validate grid size."""
+        if not self.colors or not self.colors[0]:
+            raise ValueError("An array needs at least one board")
+        if any(len(row) != len(self.colors[0]) for row in self.colors):
+            raise ValueError("Every row of an array needs the same number of boards")
+
+    @property
+    def board(self) -> VestaboardModel:
+        """Return the top left board, which sets the size of every board."""
+        return VestaboardModel(self.colors[0][0], self.model)
+
+    @property
+    def grid_rows(self) -> int:
+        """Return the number of rows of boards."""
+        return len(self.colors)
+
+    @property
+    def grid_columns(self) -> int:
+        """Return the number of columns of boards."""
+        return len(self.colors[0])
+
+    @property
+    def name(self) -> str:
+        """Return the name."""
+        return (
+            f"Vestaboard {self.model.capitalize()} Array "
+            f"({self.grid_rows}x{self.grid_columns})"
+        )
+
+    def board_at(self, row: int, column: int) -> VestaboardModel:
+        """Return the board that a bit at this array row and column belongs to."""
+        board = self.board
+        color = self.colors[row // board.rows][column // board.columns]
+        return VestaboardModel(color, self.model)
+
+    @property
+    def is_flagship(self) -> bool:
+        """Return True if the array is made of flagship boards."""
+        return self.board.is_flagship
+
+    @property
+    def rows(self) -> int:
+        """Return the number of rows across the whole array."""
+        return self.board.rows * self.grid_rows
+
+    @property
+    def columns(self) -> int:
+        """Return the number of columns across the whole array."""
+        return self.board.columns * self.grid_columns
+
+    @property
+    def has_frame(self) -> bool:
+        """Return False, as arrays are drawn as bits only, edge to edge."""
+        return False
+
+    @property
+    def width(self) -> float:
+        """Return the physical width of the array's bits plus margin, in inches."""
+        return frameless_width(self.columns)
+
+    @property
+    def height(self) -> float:
+        """Return the physical height of the array's bits plus margin, in inches."""
+        return frameless_height(self.rows)
+
+    @property
+    def frame_border(self) -> float:
+        """Return the margin around the bits, matching the spacing between them."""
+        return FRAMELESS_MARGIN
+
+    @property
+    def frame_thickness(self) -> float:
+        """Return the frame thickness, which is zero as arrays have no frame."""
+        return 0
+
+    @property
+    def bit_color(self) -> str:
+        """Return the bit color."""
+        return self.board.bit_color
+
+    @property
+    def frame_color(self) -> str:
+        """Return the frame color."""
+        return self.board.frame_color
+
+    @property
+    def logo_color(self) -> str:
+        """Return the logo color."""
+        return self.board.logo_color
+
+    @property
+    def text_color(self) -> str:
+        """Return the text color."""
+        return self.board.text_color
+
+    @property
+    def color_map(self) -> dict[int, str]:
+        """Return the color map."""
+        return self.board.color_map
+
+    @property
+    def emoji_map(self) -> dict[int, str]:
+        """Return the emoji map."""
+        return self.board.emoji_map
+
+    def emoji_for_code(self, code: int) -> str | None:
+        """Return the emoji override for a given code, if defined."""
+        return self.board.emoji_for_code(code)
+
+    def parse_template(
+        self, template: str, style: ComponentStyle | None = None
+    ) -> list[list[int]]:
+        """Parse VBML template using the array's size."""
+        return vbml.parse(
+            {
+                "style": {"height": self.rows, "width": self.columns},
+                "components": [{"template": template, "style": style}],
+            }
+        )
+
+    def parse_vbml(self, data: IVBML) -> list[list[int]]:
+        """Parse VBML using the array's size."""
+        data["style"] = {"height": self.rows, "width": self.columns}
+        return vbml.parse(data)
+
+    def split(self, data: list[list[int]]) -> list[list[list[list[int]]]]:
+        """Split array-sized data into a grid of board-sized tiles."""
+        rows, columns = self.board.rows, self.board.columns
+        return [
+            [
+                [
+                    row[grid_column * columns : (grid_column + 1) * columns]
+                    for row in data[grid_row * rows : (grid_row + 1) * rows]
+                ]
+                for grid_column in range(self.grid_columns)
+            ]
+            for grid_row in range(self.grid_rows)
+        ]
+
+    def join(self, tiles: list[list[list[list[int] | None]]]) -> list[list[int]]:
+        """Join a grid of board-sized tiles into array-sized data.
+
+        Missing tiles (``None``) are rendered as blank.
+        """
+        blank = [[0] * self.board.columns for _ in range(self.board.rows)]
+        data: list[list[int]] = []
+        for tile_row in tiles:
+            tile_row = [tile or blank for tile in tile_row]
+            for row in range(self.board.rows):
+                data.append([code for tile in tile_row for code in tile[row]])
+        return data

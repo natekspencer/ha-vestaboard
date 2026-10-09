@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import logging
 
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 
@@ -14,12 +16,19 @@ from .client import VestaboardVirtualClient
 from .const import (
     COLOR_BLACK,
     CONF_BOARD_MODEL,
+    CONF_LAYOUT,
     DATA_HASS_CONFIG,
     DOMAIN,
+    ENTRY_TYPE_ARRAY,
     ENTRY_TYPE_VIRTUAL,
 )
-from .coordinator import VestaboardConfigEntry, VestaboardCoordinator
-from .helpers import create_client, get_entry_type
+from .coordinator import (
+    VestaboardArrayCoordinator,
+    VestaboardConfigEntry,
+    VestaboardCoordinator,
+)
+from .helpers import create_client, get_entry_type, is_array_entry
+from .repairs import ISSUE_ARRAY_MISSING_BOARD
 from .services import async_setup_services
 from .vestaboard_model import VestaboardModel
 
@@ -46,8 +55,12 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: VestaboardConfigEntry) -> bool:
     """Set up Vestaboard from a config entry."""
+    entry_type = get_entry_type(entry)
+    if entry_type == ENTRY_TYPE_ARRAY:
+        return await _async_setup_array_entry(hass, entry)
+
     store = None
-    if get_entry_type(entry) == ENTRY_TYPE_VIRTUAL:
+    if entry_type == ENTRY_TYPE_VIRTUAL:
         store = _virtual_store(hass, entry)
         saved = (await store.async_load() or {}).get("message")
         board = VestaboardModel(COLOR_BLACK, entry.data[CONF_BOARD_MODEL])
@@ -65,6 +78,50 @@ async def async_setup_entry(hass: HomeAssistant, entry: VestaboardConfigEntry) -
         raise ConfigEntryNotReady
 
     entry.runtime_data = coordinator
+
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    entry.async_on_unload(entry.add_update_listener(update_listener))
+
+    @callback
+    def _async_on_state_change() -> None:
+        if entry.state is ConfigEntryState.LOADED:
+            _async_reload_arrays_with_member(hass, entry.entry_id)
+
+    entry.async_on_unload(entry.async_on_state_change(_async_on_state_change))
+
+    return True
+
+
+async def _async_setup_array_entry(
+    hass: HomeAssistant, entry: VestaboardConfigEntry
+) -> bool:
+    """Set up a Vestaboard array from a config entry."""
+    coordinator = VestaboardArrayCoordinator(hass, entry)
+    for entry_id in coordinator.member_entry_ids:
+        if (member := hass.config_entries.async_get_entry(entry_id)) is None:
+            ir.async_create_issue(
+                hass,
+                DOMAIN,
+                _missing_board_issue_id(entry.entry_id),
+                is_fixable=True,
+                severity=ir.IssueSeverity.ERROR,
+                translation_key=ISSUE_ARRAY_MISSING_BOARD,
+                data={"entry_id": entry.entry_id},
+                translation_placeholders={"array": entry.title},
+            )
+            raise ConfigEntryError(
+                "A Vestaboard in this array has been deleted. "
+                "Reconfigure or delete this array."
+            )
+        if member.state is not ConfigEntryState.LOADED:
+            raise ConfigEntryNotReady(f"Waiting for Vestaboard {member.title}")
+
+    await coordinator.async_config_entry_first_refresh()
+
+    entry.runtime_data = coordinator
+    coordinator.async_setup_member_listeners()
+    ir.async_delete_issue(hass, DOMAIN, _missing_board_issue_id(entry.entry_id))
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -105,16 +162,51 @@ def _async_save_virtual_message(
     entry.async_on_unload(lambda: store.async_save(dict(latest)))
 
 
+@callback
+def _async_reload_arrays_with_member(hass: HomeAssistant, entry_id: str) -> None:
+    """Reload arrays containing this board so they use its new coordinator."""
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        if (
+            is_array_entry(entry)
+            and entry.state
+            in (
+                ConfigEntryState.LOADED,
+                ConfigEntryState.SETUP_IN_PROGRESS,
+                ConfigEntryState.SETUP_RETRY,
+            )
+            and any(entry_id in row for row in entry.data[CONF_LAYOUT])
+        ):
+            hass.config_entries.async_schedule_reload(entry.entry_id)
+
+
+def _missing_board_issue_id(array_entry_id: str) -> str:
+    """Return the repair issue id for an array that has lost a board."""
+    return f"{ISSUE_ARRAY_MISSING_BOARD}_{array_entry_id}"
+
+
 async def async_remove_entry(hass: HomeAssistant, entry: VestaboardConfigEntry) -> None:
     """Handle removal of a config entry."""
+    if is_array_entry(entry):
+        ir.async_delete_issue(hass, DOMAIN, _missing_board_issue_id(entry.entry_id))
+        return
+
     if get_entry_type(entry) == ENTRY_TYPE_VIRTUAL:
         await _virtual_store(hass, entry).async_remove()
+
+    # The board is already gone, so reloading its arrays makes them fail setup
+    # and raise a repair issue rather than keep showing the board's last state
+    for array in hass.config_entries.async_entries(DOMAIN):
+        if is_array_entry(array) and any(
+            entry.entry_id in row for row in array.data[CONF_LAYOUT]
+        ):
+            hass.config_entries.async_schedule_reload(array.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: VestaboardConfigEntry) -> bool:
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    await entry.runtime_data.vestaboard.close()
+    if not is_array_entry(entry):
+        await entry.runtime_data.vestaboard.close()
     return unload_ok
 
 

@@ -5,7 +5,8 @@
         "title": "Add Vestaboard",
         "menu_options": {
           "device": "Add a Vestaboard",
-          "virtual": "Create a virtual Vestaboard"
+          "virtual": "Create a virtual Vestaboard",
+          "array": "Create a Vestaboard Note array"
         }
       },
       "device": {
@@ -17,10 +18,30 @@
       },
       "virtual": {
         "title": "Create a virtual Vestaboard",
-        "description": "A virtual Vestaboard behaves like a real one in Home Assistant, but has no hardware behind it. Use it to try out messages without any hardware.",
+        "description": "A virtual Vestaboard behaves like a real one in Home Assistant, but has no hardware behind it. Use it to try out messages, or to try out an array before you buy more boards.",
         "data": {
           "name": "Name",
           "board_model": "Model"
+        }
+      },
+      "array": {
+        "title": "{action} a Vestaboard Note array",
+        "description": "Combine Vestaboard Notes that are already set up, real or virtual, into one larger virtual board. Messages sent to the array are laid out across the whole grid, and each Note shows its portion.",
+        "data": {
+          "name": "Name",
+          "arrangement": "Arrangement",
+          "identify": "Show each Note's name on it while arranging"
+        },
+        "data_description": {
+          "arrangement": "How the Notes are physically arranged. You'll choose which Note goes in each position next.",
+          "identify": "Each available Note shows its name until you finish or close this setup, then goes back to what it was showing."
+        }
+      },
+      "array_board": {
+        "title": "Arrange Notes",
+        "description": "Choose the Note for the marked position. Positions are filled left to right, top to bottom.\n\n{layout}\n\nEach Note's current message is shown below to help tell them apart.\n\n{boards}",
+        "data": {
+          "board": "Vestaboard Note"
         }
       },
       "api_key": {
@@ -55,6 +76,8 @@
       "already_configured": "Device is already configured",
       "reauth_successful": "Re-authentication was successful",
       "reconfigure_successful": "Re-configuration was successful",
+      "board_unavailable": "The selected Vestaboard is no longer available.",
+      "not_enough_boards": "There aren't enough loaded Vestaboard Notes to fill an array of this size.",
       "virtual_reconfigure_unsupported": "Virtual Vestaboards have no connection settings to reconfigure."
     }
   },
@@ -84,7 +107,7 @@
           }
         },
         "data_description": {
-          "show_frame": "Draw the image with the Vestaboard's frame and logo. When off, only the bits are drawn, edge to edge."
+          "show_frame": "Draw the image with the Vestaboard's frame and logo. When off, only the bits are drawn, edge to edge. For arrays, this draws a separate frame around each Note."
         }
       }
     }
@@ -148,6 +171,31 @@
     "message": {
       "name": "Send message",
       "description": "Send a message to a Vestaboard."
+    }
+  },
+  "issues": {
+    "array_missing_board": {
+      "title": "{array} is missing a Vestaboard",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "{array} is missing a Vestaboard",
+            "description": "A Vestaboard that was part of **{array}** has been deleted, so **{array}** can no longer show messages.\n\nReconfigure **{array}** to choose a replacement or change its arrangement, or delete it.",
+            "menu_options": {
+              "reconfigure": "Reconfigure {array}",
+              "delete": "Delete {array}"
+            }
+          },
+          "delete": {
+            "title": "Delete {array}",
+            "description": "**{array}** will be deleted. Its Vestaboards aren't affected."
+          }
+        },
+        "abort": {
+          "array_not_found": "This array no longer exists.",
+          "reconfigure": "Continue reconfiguring the array."
+        }
+      }
     }
   }
 }
