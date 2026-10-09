@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from datetime import datetime, time, timedelta
 import logging
 
@@ -13,7 +14,7 @@ from homeassistant.helpers.event import async_track_point_in_time
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 import homeassistant.util.dt as dt_util
 
-from .client import InvalidApiKeyError, VestaboardLocalClient
+from .client import InvalidApiKeyError, VestaboardLocalClient, VestaboardVirtualClient
 from .const import (
     COLOR_BLACK,
     CONF_MODEL,
@@ -60,6 +61,8 @@ class VestaboardCoordinator(DataUpdateCoordinator):
     persistent_message: list[list[int]] | None = None
     temporary_message_expiration: datetime | None = None
     _cancel_cb: CALLBACK_TYPE | None = None
+    # Called when the persistent message changes, e.g. to save it
+    on_persistent_message: Callable[[list[list[int]]], None] | None = None
 
     _read_errors: int = 0
 
@@ -67,7 +70,7 @@ class VestaboardCoordinator(DataUpdateCoordinator):
         self,
         hass: HomeAssistant,
         config_entry: VestaboardConfigEntry,
-        vestaboard: VestaboardLocalClient,
+        vestaboard: VestaboardLocalClient | VestaboardVirtualClient,
     ) -> None:
         """Initialize."""
         super().__init__(
@@ -123,7 +126,7 @@ class VestaboardCoordinator(DataUpdateCoordinator):
             raise ConfigEntryAuthFailed
 
         if self.temporary_message_expiration is None:
-            self.persistent_message = data
+            self._set_persistent_message(data)
 
         return await self.hass.async_add_executor_job(self.process_data, data)
 
@@ -167,10 +170,17 @@ class VestaboardCoordinator(DataUpdateCoordinator):
                     self.hass, self._handle_temporary_message_expiration, expiration
                 )
             else:
-                self.persistent_message = json["characters"]
+                self._set_persistent_message(json["characters"])
                 current = self.temporary_message_expiration
                 if not (current and current > dt_util.now()):
                     await self.write_and_update_state(json)
+
+    def _set_persistent_message(self, rows: list[list[int]]) -> None:
+        """Set the persistent message, notifying if it changed."""
+        changed = rows != self.persistent_message
+        self.persistent_message = rows
+        if changed and self.on_persistent_message:
+            self.on_persistent_message(rows)
 
     async def async_clear_temporary_message(self) -> None:
         """Clear an active temporary message, reverting to the persistent message."""
