@@ -410,6 +410,11 @@ class VestaboardComposerPanel extends HTMLElement {
     // The grid the text was last laid out as, to tell if the board still
     // shows the text
     this._textGrid = null;
+    // Whether the message's latest layout succeeded, so a message that
+    // couldn't be laid out isn't sent as an older layout
+    this._textLaidOut = true;
+    // Counts changes to the grid, so a layout doesn't replace later edits
+    this._gridRevision = 0;
     this._painting = false;
     this._layoutTimer = null;
     this._layoutRequest = 0;
@@ -521,12 +526,14 @@ class VestaboardComposerPanel extends HTMLElement {
     if (draft && sameSize(draft.grid, board.rows, board.columns)) {
       this._grid = draft.grid;
       this._textGrid = sameSize(draft.textGrid, board.rows, board.columns) ? draft.textGrid : null;
+      this._textLaidOut = draft.textLaidOut !== false;
       this._text = draft.text || "";
       this._justify = draft.justify || "center";
       this._align = draft.align || "center";
     } else {
       this._grid = copyGrid(board.characters);
       this._text = "";
+      this._textLaidOut = true;
     }
     this._cursor = { row: 0, column: 0 };
     this._lineStart = 0;
@@ -547,6 +554,7 @@ class VestaboardComposerPanel extends HTMLElement {
     writeDraft(this._board.device_id, {
       grid: this._grid,
       textGrid: this._textGrid,
+      textLaidOut: this._textLaidOut,
       text: this._text,
       justify: this._justify,
       align: this._align,
@@ -1086,12 +1094,14 @@ class VestaboardComposerPanel extends HTMLElement {
   _setCode(row, column, code) {
     if (this._grid[row]?.[column] === undefined || this._grid[row][column] === code) return;
     this._grid[row][column] = code;
+    this._gridRevision += 1;
     this._renderCell(row, column);
   }
 
   /** Replace and draw the whole grid. */
   _setGrid(grid) {
     this._grid = copyGrid(grid);
+    this._gridRevision += 1;
     this._renderGrid();
     this._changed();
   }
@@ -1324,7 +1334,12 @@ class VestaboardComposerPanel extends HTMLElement {
   /** Show the message on the board, or start the message from the board. */
   _syncText() {
     // Keep the message and the board in step when Text mode opens
-    if (this._textGrid && sameGrid(this._grid, this._textGrid)) return;
+    if (this._textGrid && sameGrid(this._grid, this._textGrid)) {
+      // The board shows the message's last layout; lay it out again if the
+      // message changed since and its layout failed
+      if (!this._textLaidOut) this._layout();
+      return;
+    }
     if (isBlank(this._grid)) {
       // Show the message on the board
       if (this._text.trim()) this._layout();
@@ -1332,6 +1347,8 @@ class VestaboardComposerPanel extends HTMLElement {
     }
     // The board shows something else, so start the message from it
     this._text = this._gridText(this._grid);
+    this._textGrid = null;
+    this._textLaidOut = true;
     this._messageInput.value = this._text;
     this._messageInput.setSelectionRange(this._text.length, this._text.length);
     this._saveDraft();
@@ -1371,6 +1388,7 @@ class VestaboardComposerPanel extends HTMLElement {
 
   /** Lay out the message shortly after the latest edit. */
   _scheduleLayout() {
+    this._textLaidOut = false;
     this._saveDraft();
     clearTimeout(this._layoutTimer);
     this._layoutTimer = setTimeout(() => {
@@ -1395,6 +1413,7 @@ class VestaboardComposerPanel extends HTMLElement {
     if (!this._board) return true;
     const request = ++this._layoutRequest;
     const deviceId = this._board.device_id;
+    const revision = this._gridRevision;
     let result;
     try {
       result = await this._hass.callWS({
@@ -1406,13 +1425,22 @@ class VestaboardComposerPanel extends HTMLElement {
       });
     } catch (err) {
       if (request === this._layoutRequest) {
+        this._textLaidOut = false;
+        this._saveDraft();
         this._setStatus(`Couldn't lay out the message: ${err.message || err}`, "error");
         return false;
       }
       return true;
     }
-    // Ignore a stale layout, or one for a board that's no longer selected
-    if (request !== this._layoutRequest || this._board?.device_id !== deviceId) return true;
+    // Ignore a stale layout, one for a board that's no longer selected, or
+    // one that would replace edits made to the board meanwhile
+    if (
+      request !== this._layoutRequest ||
+      this._board?.device_id !== deviceId ||
+      this._gridRevision !== revision
+    ) {
+      return true;
+    }
     if (!this._textPushed) {
       this._pushHistory();
       this._textPushed = true;
@@ -1420,6 +1448,7 @@ class VestaboardComposerPanel extends HTMLElement {
     this._lastAction = null;
     // Set before the grid, which saves the draft
     this._textGrid = copyGrid(result.characters);
+    this._textLaidOut = true;
     this._setGrid(result.characters);
     if (this._status.classList.contains("error")) this._setStatus("");
     return true;
@@ -1436,8 +1465,13 @@ class VestaboardComposerPanel extends HTMLElement {
     try {
       // Lay out the latest Text mode edits, including any made while waiting,
       // so no layout can change the board after it's sent
-      while (this._layoutTimer || this._layoutPromise) {
-        if (this._layoutTimer) {
+      while (
+        this._layoutTimer ||
+        this._layoutPromise ||
+        (this._mode === "text" && !this._textLaidOut)
+      ) {
+        if (this._layoutTimer || !this._layoutPromise) {
+          // Lay out waiting edits, or retry a message whose layout failed
           clearTimeout(this._layoutTimer);
           this._layoutTimer = null;
           this._layout();
