@@ -104,7 +104,7 @@ After a Vestaboard is set up, open its **Configure** dialog to change:
 |            |                                         Black                                         |                                         White                                         |
 | ---------- | :-----------------------------------------------------------------------------------: | :-----------------------------------------------------------------------------------: |
 | Flagship   |   <img alt="Flagship Black Connected" src="images/flagship-black.png" width="100%">   |   <img alt="Flagship White Connected" src="images/flagship-white.png" width="100%">   |
-| Note       |        <img alt="Note Black Connected" src="images/note-black.png" width="70%">       |        <img alt="Note White Connected" src="images/note-white.png" width="70%">       |
+| Note       |       <img alt="Note Black Connected" src="images/note-black.png" width="70%">        |       <img alt="Note White Connected" src="images/note-white.png" width="70%">        |
 | Note array | <img alt="Note Array Black Connected" src="images/note-array-black.png" width="100%"> | <img alt="Note Array White Connected" src="images/note-array-white.png" width="100%"> |
 
 The Note array images show 4 Notes in 2 rows of 2.
@@ -249,4 +249,4 @@ If you don't already own a Vestaboard, please consider using my referral link be
 
 ## 📈 Star History
 
-[![Star History Chart](https://api.star-history.com/chart?repos=natekspencer/ha-vestaboard&type=date&legend=top-left&sealed_token=S8oWvIEzE6WhaZ2TAACYrs6VDi3zcE9Jb3DR8rBwHwQZTwlUostTfvofcQvtvH_WX-vl8UexhG6X-i8-TLXCFo2RrDK_ChR4NIEPG1b8IbqngYFZgHd7ELpO7oqe0dMJObZP2pf_u_5G_FNXdg2FpRe4Altf74moTT_RSZEZP-08s1coJbz0f_9XZI3W)](https://www.star-history.com/?repos=natekspencer%2Fha-vestaboard)
+[![Star History Chart](https://api.star-history.com/chart?repos=natekspencer/ha-vestaboard&type=date&legend=top-left)](https://www.star-history.com/?repos=natekspencer%2Fha-vestaboard)
