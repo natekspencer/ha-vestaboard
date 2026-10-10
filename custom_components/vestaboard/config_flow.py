@@ -630,25 +630,24 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
 
         errors = {}
 
-        if user_input is not None:
-            if not (errors := await self.validate_client(user_input)):
-                data = {
-                    CONF_HOST: user_input.get(CONF_HOST, self.host),
-                    CONF_API_KEY: self.api_key,
-                }
-                if existing_entry := self.hass.config_entries.async_get_entry(
-                    self.context.get("entry_id")
-                ):
-                    self.hass.config_entries.async_update_entry(
-                        existing_entry, data=data
-                    )
-                    await self.hass.config_entries.async_reload(existing_entry.entry_id)
-                    return self.async_abort(reason="reauth_successful")
+        if user_input is not None and not (
+            errors := await self.validate_client(user_input)
+        ):
+            data = {
+                CONF_HOST: user_input.get(CONF_HOST, self.host),
+                CONF_API_KEY: self.api_key,
+            }
+            if existing_entry := self.hass.config_entries.async_get_entry(
+                self.context.get("entry_id")
+            ):
+                self.hass.config_entries.async_update_entry(existing_entry, data=data)
+                await self.hass.config_entries.async_reload(existing_entry.entry_id)
+                return self.async_abort(reason="reauth_successful")
 
-                return self.async_create_entry(
-                    title=self.name or "Vestaboard",
-                    data=data,
-                )
+            return self.async_create_entry(
+                title=self.name or "Vestaboard",
+                data=data,
+            )
 
         schema = self.add_suggested_values_to_schema(
             schema, {CONF_API_KEY: self.api_key}
@@ -683,7 +682,7 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
             errors["base"] = "timeout_connect"
         except ClientConnectorError:
             errors["base"] = "invalid_host"
-        except Exception as ex:  # pylint: disable=broad-except
+        except Exception as ex:  # noqa: BLE001  # pylint: disable=broad-except
             _LOGGER.error(ex)
             errors["base"] = "unknown"
         return errors
