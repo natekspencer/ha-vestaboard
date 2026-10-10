@@ -252,3 +252,9 @@ If you don't already own a Vestaboard, please consider using my referral link be
 ## 📈 Star History
 
 [![Star History Chart](https://api.star-history.com/chart?repos=natekspencer/ha-vestaboard&type=date&legend=top-left)](https://www.star-history.com/?repos=natekspencer%2Fha-vestaboard)
+
+## ⚖️ Trademark Legal Notices
+
+All product names, trademarks and registered trademarks in the images in this repository, are property of their respective owners. All images in this repository are used by the Home Assistant project for identification purposes only.
+
+The use of these names, trademarks and brands appearing in these image files, do not imply endorsement.
