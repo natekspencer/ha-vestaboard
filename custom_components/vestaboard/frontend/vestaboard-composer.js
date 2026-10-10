@@ -58,7 +58,7 @@ const ALIGN = [
   ["top", "Top", "mdi:format-vertical-align-top"],
   ["center", "Center", "mdi:format-vertical-align-center"],
   ["bottom", "Bottom", "mdi:format-vertical-align-bottom"],
-  ["justified", "Justified", "mdi:distribute-vertical-center"],
+  ["justified", "Justified", "mdi:align-vertical-distribute"],
 ];
 
 // Largest and smallest bit width, in pixels
