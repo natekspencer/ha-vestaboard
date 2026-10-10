@@ -8,6 +8,12 @@
   "dhcp": [
     {
       "macaddress": "4C93A60*"
+    },
+    {
+      "hostname": "vestaboard*"
+    },
+    {
+      "registered_devices": true
     }
   ],
   "documentation": "https://github.com/natekspencer/ha-vestaboard",
