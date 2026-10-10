@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import base64
+from functools import cache
 import io
 import logging
 from typing import TYPE_CHECKING, Any, cast
 
-from PIL import Image, ImageDraw, ImageOps
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 from pyvbml.character_codes import COLOR_CODES, CharacterCode
 
 from homeassistant.config_entries import ConfigEntry
@@ -39,6 +40,8 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
+LOGO_TEXT = "VESTABOARD"
+
 PRINTABLE = (
     " ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890!@#$() - +&=;: '\"%,.  /? °🟥🟧🟨🟩🟦🟪⬜⬛■"
 )
@@ -69,13 +72,9 @@ async def create_client(
     return client
 
 
-def draw_emoji(emoji: str, size: tuple[int, int]) -> Image.Image:
-    """Draw a scaled emoji image at the requested size.
-
-    :param size: The requested size in pixels, as a tuple or array:
-        (width, height).
-    :returns: An :py:class:`~PIL.Image.Image` object.
-    """
+@cache
+def _draw_emoji_flap(emoji: str) -> Image.Image:
+    """Draw an emoji on a flap, with the flap line through it."""
     # draw the emoji
     width, height = 76, 90
     emoji_font = load_emoji_font()
@@ -89,9 +88,22 @@ def draw_emoji(emoji: str, size: tuple[int, int]) -> Image.Image:
     hinge_y = int(height * 0.45)
     draw.line([(0, hinge_y), (width, hinge_y)], fill=0, width=int(height * 0.035))
     img.putalpha(mask)
+    return img
 
-    # size appropriately and return
-    return ImageOps.contain(img, size, Image.LANCZOS)
+
+def draw_emoji(emoji: str, size: tuple[int, int]) -> Image.Image:
+    """Draw a scaled emoji image at the requested size.
+
+    :param size: The requested size in pixels, as a tuple or array:
+        (width, height).
+    :returns: An :py:class:`~PIL.Image.Image` object.
+    """
+    return ImageOps.contain(_draw_emoji_flap(emoji), size, Image.LANCZOS)
+
+
+def emoji_png(emoji: str) -> bytes:
+    """Return an emoji as a png, drawn as the board image draws it."""
+    return _to_png(_draw_emoji_flap(emoji))
 
 
 def create_png(
@@ -324,10 +336,28 @@ def _draw_logo(
     width: int,
 ) -> None:
     """Draw the logo centered in the frame below the bits."""
-    logo_text = "VESTABOARD"
+    logo_font, logo_y = _logo_position(draw, model, start_y, bit_h, gap_y, inner_border)
+    draw.text(
+        (width / 2, logo_y),
+        LOGO_TEXT,
+        fill=model.logo_color,
+        anchor="md",
+        font=logo_font,
+    )
+
+
+def _logo_position(
+    draw: ImageDraw.ImageDraw,
+    model: VestaboardModel,
+    start_y: float,
+    bit_h: float,
+    gap_y: float,
+    inner_border: float,
+) -> tuple[ImageFont.FreeTypeFont, float]:
+    """Return the logo's font and the y position of its descender line."""
     logo_font = load_font(int(bit_h * 0.3))
 
-    text_bbox = draw.textbbox((0, 0), logo_text, font=logo_font)
+    text_bbox = draw.textbbox((0, 0), LOGO_TEXT, font=logo_font)
     text_height = text_bbox[3] - text_bbox[1]
 
     bottom_inner_top = start_y + model.rows * (bit_h + gap_y)
@@ -337,15 +367,27 @@ def _draw_logo(
     inner_center_y = bottom_inner_top + bottom_inner_height / 2
 
     # adjust y to place visual center of text at inner_center_y
-    logo_y = inner_center_y - text_height
+    return logo_font, inner_center_y - text_height
 
-    draw.text(
-        (width / 2, logo_y),
-        logo_text,
-        fill=model.logo_color,
-        anchor="md",
-        font=logo_font,
+
+def logo_layout(model: VestaboardModel, height: int = 1080) -> dict[str, float]:
+    """Return the logo's font size and descender line, in inches from the top.
+
+    Measured as the board image draws it, so other renderings can match it.
+    """
+    px_per_in = height / model.height
+    start_y = (model.frame_thickness + model.frame_border) * px_per_in
+    bit_h = BIT_HEIGHT * px_per_in
+    draw = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    logo_font, logo_y = _logo_position(
+        draw,
+        model,
+        start_y,
+        bit_h,
+        BIT_HEIGHT_SPACING * px_per_in,
+        model.frame_border * px_per_in,
     )
+    return {"size": logo_font.size / px_per_in, "descender": logo_y / px_per_in}
 
 
 def create_svg(data: list[list[int]], color: str = COLOR_BLACK) -> str:

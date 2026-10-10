@@ -29,6 +29,11 @@ from .coordinator import (
     entry_reload_key,
 )
 from .helpers import create_client, get_entry_type, is_array_entry
+from .panel import (
+    async_register_panel,
+    async_remove_panel_if_unused,
+    async_setup_static_paths,
+)
 from .repairs import (
     ISSUE_ARRAY_BOARD_DISABLED,
     ISSUE_ARRAY_MISSING_BOARD,
@@ -36,6 +41,7 @@ from .repairs import (
 )
 from .services import async_setup_services
 from .vestaboard_model import VestaboardModel
+from .websocket import async_setup_websocket
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -57,6 +63,8 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up the Vestaboard integration."""
     async_setup_services(hass)
     hass.data[DOMAIN] = {DATA_HASS_CONFIG: config}
+    async_setup_websocket(hass)
+    await async_setup_static_paths(hass)
     return True
 
 
@@ -87,6 +95,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: VestaboardConfigEntry) -
     entry.runtime_data = coordinator
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    await async_register_panel(hass)
 
     entry.async_on_unload(entry.add_update_listener(update_listener))
 
@@ -135,6 +144,7 @@ async def _async_setup_array_entry(
     _async_delete_array_issues(hass, entry)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    await async_register_panel(hass)
 
     entry.async_on_unload(entry.add_update_listener(update_listener))
 
@@ -244,6 +254,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: VestaboardConfigEntry) 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if not is_array_entry(entry):
         await entry.runtime_data.vestaboard.close()
+    async_remove_panel_if_unused(hass, entry.entry_id)
     return unload_ok
 
 
