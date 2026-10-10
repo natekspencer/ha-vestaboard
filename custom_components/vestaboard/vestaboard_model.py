@@ -18,6 +18,10 @@ BIT_HEIGHT = 2 + 1 / 32
 BIT_WIDTH_SPACING = 29 / 64
 BIT_HEIGHT_SPACING = 55 / 64
 
+# The heart replaces the degree sign on Notes and newer Flagships
+HEART_CODE: Final = 62
+HEART_EMOJI: Final = "❤️"
+
 # Without a frame, the margin around the bits matches the spacing between them
 FRAMELESS_MARGIN = BIT_WIDTH_SPACING
 
@@ -105,7 +109,7 @@ MODELS: Final[dict[str, ModelSpec]] = {
         height=12.2,
         frame_thickness=5 / 32,
         frame_border=2,
-        emoji_map={62: "❤️"},
+        emoji_map={HEART_CODE: HEART_EMOJI},
     ),
 }
 MODEL_BY_SIZE: Final[dict[tuple[int, int], str]] = {
@@ -121,6 +125,8 @@ class VestaboardModel:
     model: str
     has_frame: bool = True
     """Whether the board is drawn with its frame and logo, or as bits only."""
+    has_heart: bool = False
+    """Whether the board has a heart in place of the degree sign."""
 
     def __post_init__(self) -> None:
         """Validate color and model."""
@@ -162,6 +168,8 @@ class VestaboardModel:
     @property
     def emoji_map(self) -> dict[int, str]:
         """Return the emoji map."""
+        if self.has_heart:
+            return MODELS[self.model].emoji_map | {HEART_CODE: HEART_EMOJI}
         return MODELS[self.model].emoji_map
 
     @property
@@ -249,7 +257,11 @@ class VestaboardModel:
 
     @classmethod
     def from_color(
-        cls, color: str, data: list[list[int]] | None = None, has_frame: bool = True
+        cls,
+        color: str,
+        data: list[list[int]] | None = None,
+        has_frame: bool = True,
+        has_heart: bool = False,
     ) -> Self:
         """Factory with validation to return Vestaboard model based on color and size."""
         if data is None:
@@ -263,7 +275,7 @@ class VestaboardModel:
                 f"Unknown Vestaboard model: {model or f'{size[0]}x{size[1]}'} {color!r}"
             )
 
-        return cls(color, model, has_frame)
+        return cls(color, model, has_frame, has_heart)
 
     def parse_template(
         self, template: str, style: ComponentStyle | None = None

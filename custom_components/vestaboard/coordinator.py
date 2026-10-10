@@ -19,6 +19,7 @@ import homeassistant.util.dt as dt_util
 from .client import InvalidApiKeyError, VestaboardLocalClient, VestaboardVirtualClient
 from .const import (
     COLOR_BLACK,
+    CONF_HEART,
     CONF_LAYOUT,
     CONF_MODEL,
     CONF_QUIET_END,
@@ -164,9 +165,10 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
                     self.model_color,
                     data,
                     has_frame=self.config_entry.options.get(CONF_SHOW_FRAME, True),
+                    has_heart=self.config_entry.options.get(CONF_HEART, False),
                 )
             self.last_updated = dt_util.now()
-            self.message = decode(data)
+            self.message = decode(data, self.model.emoji_map)
             self.image = create_png(data, self.model_color, model=self.model)
         return data
 
@@ -472,7 +474,7 @@ class VestaboardArrayCoordinator(
         """Process data."""
         if data != self.data:
             self.last_updated = dt_util.now()
-            self.message = decode(data)
+            self.message = decode(data, self.model.emoji_map)
             if self.config_entry.options.get(CONF_SHOW_FRAME, False):
                 self.image = create_framed_array_png(
                     self.model.split(data), self.model.colors

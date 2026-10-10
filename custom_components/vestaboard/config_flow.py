@@ -28,6 +28,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult, section
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.schema_config_entry_flow import (
+    SchemaCommonFlowHandler,
     SchemaFlowFormStep,
     SchemaOptionsFlowHandler,
 )
@@ -51,6 +52,7 @@ from .const import (
     CONF_BOARD_MODEL,
     CONF_ENABLEMENT_TOKEN,
     CONF_ENTRY_TYPE,
+    CONF_HEART,
     CONF_IDENTIFY,
     CONF_JUSTIFY,
     CONF_LAYOUT,
@@ -87,41 +89,67 @@ STEP_VIRTUAL_SCHEMA = vol.Schema(
         ),
     }
 )
-OPTIONS_SCHEMA = vol.Schema(
+COLOR_SCHEMA = vol.In({COLOR_BLACK: "Black", COLOR_WHITE: "White"})
+# Display options come first, then the default transition
+TRANSITION_OPTIONS = {
+    vol.Optional(CONF_STRATEGY): section(
+        vol.Schema(
+            {
+                vol.Required(CONF_STRATEGY): vol.In(CONF_TRANSITIONS),
+                vol.Optional(CONF_STEP_SIZE): NumberSelector(
+                    NumberSelectorConfig(
+                        min=1,
+                        max=132,
+                        step=1,
+                        unit_of_measurement="columns/rows/bits",
+                    )
+                ),
+                vol.Optional(CONF_STEP_INTERVAL_MS): NumberSelector(
+                    NumberSelectorConfig(
+                        min=1, max=3000, step=1, unit_of_measurement="milliseconds"
+                    )
+                ),
+            }
+        )
+    ),
+}
+BOARD_OPTIONS_SCHEMA = vol.Schema(
     {
-        vol.Required(CONF_MODEL, default=COLOR_BLACK): vol.In(
-            {COLOR_BLACK: "Black", COLOR_WHITE: "White"}
-        ),
-        vol.Optional(CONF_STRATEGY): section(
-            vol.Schema(
-                {
-                    vol.Required(CONF_STRATEGY): vol.In(CONF_TRANSITIONS),
-                    vol.Optional(CONF_STEP_SIZE): NumberSelector(
-                        NumberSelectorConfig(
-                            min=1,
-                            max=132,
-                            step=1,
-                            unit_of_measurement="columns/rows/bits",
-                        )
-                    ),
-                    vol.Optional(CONF_STEP_INTERVAL_MS): NumberSelector(
-                        NumberSelectorConfig(
-                            min=1, max=3000, step=1, unit_of_measurement="milliseconds"
-                        )
-                    ),
-                }
-            )
-        ),
+        vol.Required(CONF_MODEL, default=COLOR_BLACK): COLOR_SCHEMA,
+        vol.Optional(CONF_SHOW_FRAME, default=True): bool,
+        **TRANSITION_OPTIONS,
     }
 )
-BOARD_OPTIONS_SCHEMA = OPTIONS_SCHEMA.extend(
-    {vol.Optional(CONF_SHOW_FRAME, default=True): bool}
+# Newer Flagships have a heart in place of the degree sign, as Notes always do
+FLAGSHIP_OPTIONS_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_MODEL, default=COLOR_BLACK): COLOR_SCHEMA,
+        vol.Optional(CONF_HEART, default=False): bool,
+        vol.Optional(CONF_SHOW_FRAME, default=True): bool,
+        **TRANSITION_OPTIONS,
+    }
 )
-OPTIONS_FLOW = {"init": SchemaFlowFormStep(BOARD_OPTIONS_SCHEMA)}
+
+
+async def _board_options_schema(handler: SchemaCommonFlowHandler) -> vol.Schema:
+    """Return the board options, with the heart option for Flagships only."""
+    entry = handler.parent_handler.config_entry
+    # Virtual boards store their model; physical boards report it once loaded
+    model = entry.data.get(CONF_BOARD_MODEL)
+    coordinator = getattr(entry, "runtime_data", None)
+    if model is None and coordinator is not None and coordinator.model is not None:
+        model = coordinator.model.model
+    # Only Flagships are asked about the heart during setup
+    if model == MODEL_FLAGSHIP or CONF_HEART in entry.options:
+        return FLAGSHIP_OPTIONS_SCHEMA
+    return BOARD_OPTIONS_SCHEMA
+
+
+OPTIONS_FLOW = {"init": SchemaFlowFormStep(_board_options_schema)}
 # Arrays have no color of their own; each board in the array uses its own color
 ARRAY_OPTIONS_SCHEMA = vol.Schema(
-    {key: value for key, value in OPTIONS_SCHEMA.schema.items() if key != CONF_MODEL}
-).extend({vol.Optional(CONF_SHOW_FRAME, default=False): bool})
+    {vol.Optional(CONF_SHOW_FRAME, default=False): bool, **TRANSITION_OPTIONS}
+)
 ARRAY_OPTIONS_FLOW = {"init": SchemaFlowFormStep(ARRAY_OPTIONS_SCHEMA)}
 
 VESTABOARD_CONNECTED_MESSAGE = [
@@ -269,6 +297,10 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
     api_key: str | None = None
     name: str | None = None
 
+    # Board setup state, kept until the appearance step creates the entry
+    board_model: str | None = None
+    entry_data: dict[str, Any] | None = None
+
     # Array setup state
     array_rows: int = 0
     array_columns: int = 0
@@ -376,15 +408,42 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Handle setting up a virtual Vestaboard, which has no hardware behind it."""
         if user_input is not None:
-            return self.async_create_entry(
-                title=user_input[CONF_NAME],
-                data={
-                    CONF_ENTRY_TYPE: ENTRY_TYPE_VIRTUAL,
-                    CONF_BOARD_MODEL: user_input[CONF_BOARD_MODEL],
-                },
-            )
+            self.name = user_input[CONF_NAME]
+            self.board_model = user_input[CONF_BOARD_MODEL]
+            self.entry_data = {
+                CONF_ENTRY_TYPE: ENTRY_TYPE_VIRTUAL,
+                CONF_BOARD_MODEL: self.board_model,
+            }
+            return await self.async_step_appearance()
 
         return self.async_show_form(step_id="virtual", data_schema=STEP_VIRTUAL_SCHEMA)
+
+    async def async_step_appearance(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Choose the board's color, and for Flagships whether it has the heart.
+
+        These are saved as options, so they can be changed later.
+        """
+        if user_input is not None:
+            return self.async_create_entry(
+                title=self.name or "Vestaboard",
+                data=self.entry_data,
+                options=user_input,
+            )
+
+        schema = vol.Schema(
+            {vol.Required(CONF_MODEL, default=COLOR_BLACK): COLOR_SCHEMA}
+        )
+        if self.board_model == MODEL_FLAGSHIP:
+            schema = schema.extend({vol.Required(CONF_HEART, default=False): bool})
+        return self.async_show_form(
+            step_id="appearance",
+            data_schema=schema,
+            description_placeholders={
+                "model": f"Vestaboard {(self.board_model or '').capitalize()}".strip()
+            },
+        )
 
     async def async_step_array(
         self, user_input: dict[str, Any] | None = None
@@ -644,10 +703,8 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
                 await self.hass.config_entries.async_reload(existing_entry.entry_id)
                 return self.async_abort(reason="reauth_successful")
 
-            return self.async_create_entry(
-                title=self.name or "Vestaboard",
-                data=data,
-            )
+            self.entry_data = data
+            return await self.async_step_appearance()
 
         schema = self.add_suggested_values_to_schema(
             schema, {CONF_API_KEY: self.api_key}
@@ -668,6 +725,7 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
             elif status == EndpointStatus.VALID:
                 if write_connected_message:
                     model = VestaboardModel.from_color(COLOR_BLACK, client.data)
+                    self.board_model = model.model
                     message = (
                         VESTABOARD_CONNECTED_MESSAGE
                         if model.is_flagship

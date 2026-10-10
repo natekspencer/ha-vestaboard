@@ -387,13 +387,19 @@ def create_svg(data: list[list[int]], color: str = COLOR_BLACK) -> str:
     return svg
 
 
-def decode(data: list[int] | list[list[int]]) -> None:
-    """Prints a console-formatted representation of encoded character data.
+def decode(
+    data: list[int] | list[list[int]], emoji_map: dict[int, str] | None = None
+) -> str:
+    """Return a text representation of encoded character data.
 
     ``data`` may be a single list or a two-dimensional array of character codes.
+    Codes in ``emoji_map`` are shown as their emoji, such as a heart in place of °.
     """
     rows = cast(list[list[int]], data if data and isinstance(data[0], list) else [data])
-    return "\n".join(f"{''.join(map(symbol, row))}" for row in rows)
+    emoji_map = emoji_map or {}
+    return "\n".join(
+        "".join(emoji_map.get(code) or symbol(code) for code in row) for row in rows
+    )
 
 
 def symbol(code: int) -> str:
