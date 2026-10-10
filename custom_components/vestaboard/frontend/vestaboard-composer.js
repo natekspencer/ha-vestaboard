@@ -1209,13 +1209,15 @@ class VestaboardComposerPanel extends HTMLElement {
     if (this._bypassInput.checked) data.bypass_quiet_hours = true;
 
     this._sendButton.disabled = true;
-    this._setStatus("Sending…");
+    this._setStatus("Submitting…");
     try {
       await this._hass.callService("vestaboard", "message", data);
-      const skipped = this._board.quiet_hours && !data.bypass_quiet_hours;
+      // The action doesn't report whether quiet hours skipped the message
       this._setStatus(
-        skipped ? "Skipped: the board is in quiet hours." : `Sent to ${this._board.name}.`,
-        skipped ? "warning" : "success"
+        data.bypass_quiet_hours
+          ? `Submitted to ${this._board.name}.`
+          : `Submitted to ${this._board.name}. Quiet hours may skip it.`,
+        "success"
       );
     } catch (err) {
       this._setStatus(`Couldn't send: ${err.message || err}`, "error");
