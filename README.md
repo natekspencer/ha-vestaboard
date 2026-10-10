@@ -68,7 +68,7 @@ Alternatively:
 4. Choose what to add:
    - **Add a Vestaboard** — connect a physical Vestaboard using its host and Local API key
    - **Create a virtual Vestaboard** — see [Virtual Vestaboards](#virtual-vestaboards)
-   - **Create a Vestaboard Note array** — see [Vestaboard Note arrays](#vestaboard-note-arrays)
+   - **Create a Vestaboard Note array** — see [Vestaboard Note arrays](#vestaboard-note-arrays) (shown once at least two Notes are set up)
 5. Follow the instructions to add the integration to your Home Assistant
 
 Physical Vestaboards on your network are also discovered automatically. If a board's IP address changes, use **Reconfigure** on its entry to update the host.
@@ -85,7 +85,7 @@ A Note array combines Vestaboard Notes that are already set up, real or virtual,
 
 To create an array:
 
-1. Set up each Vestaboard Note first.
+1. Set up each Vestaboard Note first. At least two Notes, real or virtual, must be set up and loaded before **Create a Vestaboard Note array** is offered.
 2. Choose **Create a Vestaboard Note array**, give it a name and choose an arrangement, such as 2 Notes side by side, or 4 Notes in 2 rows of 2. The arrangements offered depend on how many Notes you have set up.
 3. Choose the Note for each position, filled left to right, top to bottom. Each step shows the layout so far and what each available Note is currently showing.
 
