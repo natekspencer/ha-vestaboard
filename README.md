@@ -128,6 +128,21 @@ Each Vestaboard, virtual Vestaboard and Note array has the following entities:
 
 During quiet hours, messages sent with `vestaboard.message` are skipped, not queued, unless `bypass_quiet_hours` is set. An array is in quiet hours when its own quiet hours apply or when any of its Notes is in quiet hours.
 
+## 🖌️ Composer
+
+The integration adds a **Vestaboard** panel to the Home Assistant sidebar for composing messages visually. It appears while at least one Vestaboard is set up.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/composer-dark.png">
+  <img alt="Vestaboard Composer showing a Flagship with a rainbow border and the message Good morning, coffee is ready" src="images/composer-light.png" width="100%">
+</picture>
+
+- Pick any Vestaboard, virtual Vestaboard or Note array. Each board is drawn like its image in Home Assistant: in its own color, with the ❤️ or ° bit and the frame matching your board's settings. Note arrays are drawn as one board, or as framed Notes when **Show frame** is on.
+- **Visual** mode: click a bit and type, or use the **Pen**, **Fill** and **Eraser** tools with the color palette. In **Type** mode, picking a color or the heart inserts it at the cursor. Undo and redo with the buttons or Ctrl+Z / Ctrl+Shift+Z.
+- **Text** mode: type a message, pick its justify and align, and see it laid out exactly as the `vestaboard.message` action would. Click a color or the heart to insert it at the cursor. Switch back to Visual to fine-tune it.
+- **Load current** starts from what the board is showing. Your work on each board is kept in your browser until you send it.
+- Choose a transition, show the message for a set time, or bypass quiet hours, then **Send**.
+
 ## 🎬 Actions
 
 ### `vestaboard.message` - Send a message to one or more Vestaboards

@@ -126,6 +126,22 @@ SERVICE_MESSAGE_SCHEMA = vol.All(
 )
 
 
+def message_vbml(
+    message: str, justify: str = ALIGN_CENTER, align: str = ALIGN_CENTER
+) -> dict:
+    """Return VBML that lays out a plain text message."""
+    return {
+        "components": [
+            {
+                "style": {CONF_ALIGN: align, CONF_JUSTIFY: justify},
+                "template": message.replace("  ", "{70}{70}").replace(
+                    "\n\n", "\n{70}\n"
+                ),
+            }
+        ]
+    }
+
+
 @callback
 def async_setup_services(hass: HomeAssistant) -> None:
     """Set up services for the Vestaboard integration."""
@@ -133,17 +149,11 @@ def async_setup_services(hass: HomeAssistant) -> None:
     async def _async_service_message(call: ServiceCall) -> None:
         """Send a message to a Vestaboard."""
         if not (vbml := call.data.get(CONF_VBML)):
-            align = call.data.get(CONF_ALIGN, ALIGN_CENTER)
-            justify = call.data.get(CONF_JUSTIFY, ALIGN_CENTER)
-            message = {
-                "style": {CONF_ALIGN: align, CONF_JUSTIFY: justify},
-                "template": call.data.get(CONF_MESSAGE, "")
-                .replace("  ", "{70}{70}")
-                .replace("\n\n", "\n{70}\n"),
-            }
-            components = [message]
-
-            vbml = {"components": components}
+            vbml = message_vbml(
+                call.data.get(CONF_MESSAGE, ""),
+                call.data.get(CONF_JUSTIFY, ALIGN_CENTER),
+                call.data.get(CONF_ALIGN, ALIGN_CENTER),
+            )
 
         base_json = {}
         if strategy := call.data.get(CONF_STRATEGY):

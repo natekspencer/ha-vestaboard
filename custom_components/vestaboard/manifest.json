@@ -5,6 +5,11 @@
     "@natekspencer"
   ],
   "config_flow": true,
+  "dependencies": [
+    "http",
+    "panel_custom",
+    "websocket_api"
+  ],
   "dhcp": [
     {
       "macaddress": "4C93A60*"
