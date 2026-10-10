@@ -47,8 +47,19 @@ const TRANSITIONS = [
   ["diagonal", "Diagonal"],
   ["random", "Random bits"],
 ];
-const JUSTIFY = ["left", "center", "right", "justified"];
-const ALIGN = ["top", "center", "bottom", "justified"];
+// Horizontal (justify) and vertical (align) text alignment: value, label, icon
+const JUSTIFY = [
+  ["left", "Left", "mdi:format-align-left"],
+  ["center", "Center", "mdi:format-align-center"],
+  ["right", "Right", "mdi:format-align-right"],
+  ["justified", "Justified", "mdi:format-align-justify"],
+];
+const ALIGN = [
+  ["top", "Top", "mdi:format-vertical-align-top"],
+  ["center", "Center", "mdi:format-vertical-align-center"],
+  ["bottom", "Bottom", "mdi:format-vertical-align-bottom"],
+  ["justified", "Justified", "mdi:distribute-vertical-center"],
+];
 
 // Largest and smallest bit width, in pixels
 const MAX_BIT_WIDTH = 44;
@@ -490,8 +501,7 @@ class VestaboardComposerPanel extends HTMLElement {
     this._lineStart = 0;
     this._picker.value = deviceId;
     this._messageInput.value = this._text;
-    this._justifySelect.value = this._justify;
-    this._alignSelect.value = this._align;
+    this._renderAlignment();
     this._buildBoard();
     this._renderPalette();
     this._updateBoardNotes();
@@ -579,8 +589,8 @@ class VestaboardComposerPanel extends HTMLElement {
               </div>
               <textarea class="message" placeholder="Type a message and it's laid out across the board"></textarea>
               <div class="row" style="margin-top: 8px">
-                <label class="field">Justify<select class="justify"></select></label>
-                <label class="field">Align<select class="align"></select></label>
+                <div class="field">Justify<div class="segmented justify"></div></div>
+                <div class="field">Align<div class="segmented align"></div></div>
                 <div class="spacer"></div>
                 <span class="hint">Switch to Visual to fine-tune the layout.</span>
               </div>
@@ -619,8 +629,8 @@ class VestaboardComposerPanel extends HTMLElement {
     this._textPalette = root.querySelector(".text-palette");
     this._toolHint = root.querySelector(".tool-hint");
     this._messageInput = root.querySelector(".message");
-    this._justifySelect = root.querySelector(".justify");
-    this._alignSelect = root.querySelector(".align");
+    this._justifyButtons = root.querySelector(".justify");
+    this._alignButtons = root.querySelector(".align");
     this._strategySelect = root.querySelector(".strategy");
     this._durationInput = root.querySelector(".duration");
     this._bypassInput = root.querySelector(".bypass");
@@ -629,8 +639,8 @@ class VestaboardComposerPanel extends HTMLElement {
     this._undoButton = root.querySelector(".undo");
     this._redoButton = root.querySelector(".redo");
 
-    this._fillSelect(this._justifySelect, JUSTIFY.map((v) => [v, v[0].toUpperCase() + v.slice(1)]));
-    this._fillSelect(this._alignSelect, ALIGN.map((v) => [v, v[0].toUpperCase() + v.slice(1)]));
+    this._fillAlignment(this._justifyButtons, JUSTIFY, "_justify");
+    this._fillAlignment(this._alignButtons, ALIGN, "_align");
     this._fillSelect(this._strategySelect, TRANSITIONS);
 
     const tools = root.querySelector(".tools");
@@ -659,14 +669,6 @@ class VestaboardComposerPanel extends HTMLElement {
       this._text = this._messageInput.value;
       this._scheduleLayout();
     });
-    this._justifySelect.addEventListener("change", () => {
-      this._justify = this._justifySelect.value;
-      this._scheduleLayout();
-    });
-    this._alignSelect.addEventListener("change", () => {
-      this._align = this._alignSelect.value;
-      this._scheduleLayout();
-    });
 
     this._boardsEl.addEventListener("pointerdown", (ev) => this._onPointerDown(ev));
     this._boardsEl.addEventListener("pointermove", (ev) => this._onPointerMove(ev));
@@ -691,6 +693,39 @@ class VestaboardComposerPanel extends HTMLElement {
         return option;
       })
     );
+  }
+
+  _fillAlignment(container, options, property) {
+    container.replaceChildren(
+      ...options.map(([value, label, icon]) => {
+        const button = document.createElement("button");
+        button.className = "icon";
+        button.dataset.value = value;
+        button.title = label;
+        button.setAttribute("aria-label", label);
+        button.innerHTML = `<ha-icon icon="${icon}"></ha-icon>`;
+        button.addEventListener("click", () => {
+          this[property] = value;
+          this._renderAlignment();
+          this._scheduleLayout();
+        });
+        return button;
+      })
+    );
+    this._renderAlignment();
+  }
+
+  _renderAlignment() {
+    for (const [container, value] of [
+      [this._justifyButtons, this._justify],
+      [this._alignButtons, this._align],
+    ]) {
+      container?.querySelectorAll("button").forEach((button) => {
+        const selected = button.dataset.value === value;
+        button.classList.toggle("selected", selected);
+        button.setAttribute("aria-pressed", String(selected));
+      });
+    }
   }
 
   _renderBoardPicker() {
