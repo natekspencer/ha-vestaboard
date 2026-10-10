@@ -315,6 +315,19 @@ function copyGrid(grid) {
   return grid.map((row) => row.slice());
 }
 
+function sameGrid(a, b) {
+  return (
+    Array.isArray(a) &&
+    Array.isArray(b) &&
+    a.length === b.length &&
+    a.every((row, r) => row.length === b[r].length && row.every((code, c) => code === b[r][c]))
+  );
+}
+
+function isBlank(grid) {
+  return grid.every((row) => row.every((code) => code === BLANK_CODE));
+}
+
 function sameSize(grid, rows, columns) {
   return (
     Array.isArray(grid) &&
@@ -366,6 +379,9 @@ class VestaboardComposerPanel extends HTMLElement {
     this._justify = "center";
     this._align = "center";
     this._textPushed = false;
+    // The grid the text was last laid out as, to tell if the board still
+    // shows the text
+    this._textGrid = null;
     this._painting = false;
     this._layoutTimer = null;
     this._layoutRequest = 0;
@@ -458,6 +474,7 @@ class VestaboardComposerPanel extends HTMLElement {
     this._future = [];
     this._lastAction = null;
     this._textPushed = false;
+    this._textGrid = null;
 
     const draft = readDraft(deviceId);
     if (draft && sameSize(draft.grid, board.rows, board.columns)) {
@@ -480,6 +497,7 @@ class VestaboardComposerPanel extends HTMLElement {
     this._updateBoardNotes();
     this._updateHistoryButtons();
     this._setStatus("");
+    if (this._mode === "text") this._syncText();
   }
 
   _saveDraft() {
@@ -914,7 +932,10 @@ class VestaboardComposerPanel extends HTMLElement {
     this.shadowRoot.querySelector(".visual-tools").classList.toggle("hidden", mode !== "visual");
     this.shadowRoot.querySelector(".text-tools").classList.toggle("hidden", mode !== "text");
     this._textPushed = false;
-    if (mode === "text") this._messageInput.focus();
+    if (mode === "text") {
+      this._syncText();
+      this._messageInput.focus();
+    }
     this._renderCursor();
   }
 
@@ -1181,6 +1202,39 @@ class VestaboardComposerPanel extends HTMLElement {
 
   // ---- Text mode --------------------------------------------------------
 
+  _syncText() {
+    // Keep the message and the board in step when Text mode opens
+    if (this._textGrid && sameGrid(this._grid, this._textGrid)) return;
+    if (isBlank(this._grid)) {
+      // Show the message on the board
+      if (this._text.trim()) this._layout();
+      return;
+    }
+    // The board shows something else, so start the message from it
+    this._text = this._gridText(this._grid);
+    this._messageInput.value = this._text;
+    this._messageInput.setSelectionRange(this._text.length, this._text.length);
+    this._saveDraft();
+  }
+
+  _gridText(grid) {
+    const lines = grid.map((row) =>
+      row
+        .map((code) => {
+          if (code === HEART_CODE) return this._board.heart ? "❤️" : "°";
+          if (code in TEXT_TOKENS) return TEXT_TOKENS[code];
+          if (COLOR_CODES.includes(code)) return `{${code}}`;
+          return this._symbols[code] || " ";
+        })
+        .join("")
+        .trim()
+    );
+    // Drop blank lines above and below the message; alignment places it
+    while (lines.length && !lines[0]) lines.shift();
+    while (lines.length && !lines[lines.length - 1]) lines.pop();
+    return lines.join("\n");
+  }
+
   _insertIntoMessage(code) {
     const token =
       code === HEART_CODE ? (this._board.heart ? "❤️" : "°") : TEXT_TOKENS[code];
@@ -1226,6 +1280,7 @@ class VestaboardComposerPanel extends HTMLElement {
     }
     this._lastAction = null;
     this._setGrid(result.characters);
+    this._textGrid = copyGrid(result.characters);
     if (this._status.classList.contains("error")) this._setStatus("");
   }
 
