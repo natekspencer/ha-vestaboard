@@ -415,6 +415,9 @@ class VestaboardComposerPanel extends HTMLElement {
     this._textLaidOut = true;
     // Counts changes to the grid, so a layout doesn't replace later edits
     this._gridRevision = 0;
+    // The grid revision when the message last changed or failed to lay out;
+    // editing the grid after that sends the edited grid instead
+    this._textRevision = 0;
     this._painting = false;
     this._layoutTimer = null;
     this._layoutRequest = 0;
@@ -535,6 +538,7 @@ class VestaboardComposerPanel extends HTMLElement {
       this._text = "";
       this._textLaidOut = true;
     }
+    this._textRevision = this._gridRevision;
     this._cursor = { row: 0, column: 0 };
     this._lineStart = 0;
     this._picker.value = deviceId;
@@ -1389,6 +1393,9 @@ class VestaboardComposerPanel extends HTMLElement {
   /** Lay out the message shortly after the latest edit. */
   _scheduleLayout() {
     this._textLaidOut = false;
+    this._textRevision = this._gridRevision;
+    // A layout of the previous message can't mark this one as laid out
+    this._layoutRequest += 1;
     this._saveDraft();
     clearTimeout(this._layoutTimer);
     this._layoutTimer = setTimeout(() => {
@@ -1426,6 +1433,7 @@ class VestaboardComposerPanel extends HTMLElement {
     } catch (err) {
       if (request === this._layoutRequest) {
         this._textLaidOut = false;
+        this._textRevision = this._gridRevision;
         this._saveDraft();
         this._setStatus(`Couldn't lay out the message: ${err.message || err}`, "error");
         return false;
@@ -1456,6 +1464,14 @@ class VestaboardComposerPanel extends HTMLElement {
 
   // ---- Sending ----------------------------------------------------------
 
+  /**
+   * Return whether the message's latest layout failed and the board hasn't
+   * been edited since, in either mode, so the board shows an older message.
+   */
+  _needsTextLayout() {
+    return !this._textLaidOut && this._gridRevision === this._textRevision;
+  }
+
   /** Send the board's message, after laying out any Text mode edits. */
   async _send() {
     if (!this._board) return;
@@ -1468,7 +1484,7 @@ class VestaboardComposerPanel extends HTMLElement {
       while (
         this._layoutTimer ||
         this._layoutPromise ||
-        (this._mode === "text" && !this._textLaidOut)
+        this._needsTextLayout()
       ) {
         if (this._layoutTimer || !this._layoutPromise) {
           // Lay out waiting edits, or retry a message whose layout failed
