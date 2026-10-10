@@ -15,9 +15,13 @@
 
 Home Assistant integration for Vestaboard messaging displays.
 
+- Control Vestaboard Flagship and Vestaboard Note boards over the Local API
+- Create [virtual Vestaboards](#virtual-vestaboards) to try out messages without any hardware
+- Combine Vestaboard Notes into a [Note array](#vestaboard-note-arrays) that acts as one larger board
+
 ## 🔐 Local API Access Required
 
-To use this integration, you **must first request access to Vestaboard's Local API**. This is required to enable local communication with your Vestaboard device.
+To connect a physical Vestaboard, you **must first request access to Vestaboard's Local API**. This is required to enable local communication with your Vestaboard device. Virtual Vestaboards don't need it.
 
 ### ✅ How to Request Access
 
@@ -25,7 +29,7 @@ To use this integration, you **must first request access to Vestaboard's Local A
 2. Fill out the request form to apply for a Local API enablement token.
 3. Once approved, you will receive a token that you'll need to configure this integration.
 
-⚠️ **Note:** The integration will not function without this token. Be sure to complete this step before proceeding with setup.
+⚠️ **Note:** A physical Vestaboard can't be added without this token. Be sure to complete this step before proceeding with setup.
 
 ## ⬇️ Installation
 
@@ -61,16 +65,66 @@ Alternatively:
 1. Go to [Settings > Devices & services](https://my.home-assistant.io/redirect/integrations/)
 2. In the bottom-right corner, select **Add integration**
 3. Type `Vestaboard` and select the **Vestaboard** integration
-4. Follow the instructions to add the integration to your Home Assistant
+4. Choose what to add:
+   - **Add a Vestaboard** — connect a physical Vestaboard using its host and Local API key
+   - **Create a virtual Vestaboard** — see [Virtual Vestaboards](#virtual-vestaboards)
+   - **Create a Vestaboard Note array** — see [Vestaboard Note arrays](#vestaboard-note-arrays)
+5. Follow the instructions to add the integration to your Home Assistant
+
+Physical Vestaboards on your network are also discovered automatically. If a board's IP address changes, use **Reconfigure** on its entry to update the host.
+
+### Virtual Vestaboards
+
+A virtual Vestaboard behaves like a real one in Home Assistant, with the same entities, image and `vestaboard.message` action, but has no hardware behind it. Use one to try out messages and automations, or to try out an array before you buy more boards.
+
+When creating one, choose a name and a model: **Vestaboard Flagship (6 x 22)** or **Vestaboard Note (3 x 15)**. A virtual board's message is saved and restored when Home Assistant restarts.
+
+### Vestaboard Note arrays
+
+A Note array combines Vestaboard Notes that are already set up, real or virtual, into one larger board. A message sent to the array is laid out across the whole grid, and each Note is sent its portion. The array writes through each Note's own connection, so it holds no API keys of its own.
+
+To create an array:
+
+1. Set up each Vestaboard Note first.
+2. Choose **Create a Vestaboard Note array**, give it a name and choose an arrangement, such as 2 Notes side by side, or 4 Notes in 2 rows of 2. The arrangements offered depend on how many Notes you have set up.
+3. Choose the Note for each position, filled left to right, top to bottom. Each step shows the layout so far and what each available Note is currently showing.
+
+Turn on **Show each Note's name on it while arranging** to help tell your Notes apart. Each Note goes back to what it was showing when you finish or close the setup.
+
+Use **Reconfigure** on the array to change its name, arrangement or Notes. If a Note in an array is deleted or disabled, Home Assistant raises a repair with options to fix the array: re-enable the Note, reconfigure the array, or delete the array.
 
 ## ⚙️ Options
 
-After this integration is set up, you can configure the color of your Vestaboard to adjust the image that is generated.
+After a Vestaboard is set up, open its **Configure** dialog to change:
 
-|          |                                       Black                                       |                                       White                                       |
-| -------- | :-------------------------------------------------------------------------------: | :-------------------------------------------------------------------------------: |
-| Flagship | <img alt="Flagship Black Connected" src="images/flagship-black.png" width="100%"> | <img alt="Flagship White Connected" src="images/flagship-white.png" width="100%"> |
-| Note     |     <img alt="Note Black Connected" src="images/note-black.png" width="70%">      |     <img alt="Note White Connected" src="images/note-white.png" width="70%">      |
+- **Color** (boards only) — the color of your Vestaboard (black or white), used for the generated image. Each Note in an array is drawn in its own color.
+- **Show frame** — draw the image with the Vestaboard's frame and logo. When off, only the bits are drawn, edge to edge. This is on by default for boards. Arrays are drawn as one continuous, frameless board by default; turning this on draws each Note in its own frame.
+- **Default transition** — the transition strategy, step size and step interval used when a message doesn't set its own. See [Transition Strategy](#transition-strategy).
+
+|            |                                         Black                                         |                                         White                                         |
+| ---------- | :-----------------------------------------------------------------------------------: | :-----------------------------------------------------------------------------------: |
+| Flagship   |   <img alt="Flagship Black Connected" src="images/flagship-black.png" width="100%">   |   <img alt="Flagship White Connected" src="images/flagship-white.png" width="100%">   |
+| Note       |        <img alt="Note Black Connected" src="images/note-black.png" width="70%">       |        <img alt="Note White Connected" src="images/note-white.png" width="70%">       |
+| Note array | <img alt="Note Array Black Connected" src="images/note-array-black.png" width="100%"> | <img alt="Note Array White Connected" src="images/note-array-white.png" width="100%"> |
+
+The Note array images show 4 Notes in 2 rows of 2.
+
+## 🧩 Entities
+
+Each Vestaboard, virtual Vestaboard and Note array has the following entities:
+
+| Entity                       | Type          | Description                                                                                                                             |
+| ---------------------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Image                        | Image         | An image of what the board is showing.                                                                                                  |
+| Message                      | Sensor        | The text the board is showing. Messages over 255 characters are trimmed in the state; the full text is in the `full_message` attribute. |
+| Temporary message            | Binary sensor | On while a temporary message (sent with `duration`) is showing.                                                                         |
+| Temporary message expiration | Sensor        | When the current temporary message expires.                                                                                             |
+| Clear temporary message      | Button        | Clears the temporary message and restores the board's persistent message.                                                               |
+| Quiet hours                  | Switch        | Turns quiet hours on or off. Turning it on with no times set uses 22:00 to 07:00.                                                       |
+| Quiet hours start            | Time          | When quiet hours start.                                                                                                                 |
+| Quiet hours end              | Time          | When quiet hours end. If the start and end times are the same, quiet hours last all day.                                                |
+
+During quiet hours, messages sent with `vestaboard.message` are skipped, not queued, unless `bypass_quiet_hours` is set. An array is in quiet hours when its own quiet hours apply or when any of its Notes is in quiet hours.
 
 ## 🎬 Actions
 
@@ -82,7 +136,7 @@ After this integration is set up, you can configure the color of your Vestaboard
 
 | Field                | Name                       | Required | Description                                                                                                                                                                       |
 | -------------------- | -------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `device_id`          | Device                     | ✅ Yes   | The Vestaboard device(s) to send the message to. Supports multiple devices.                                                                                                       |
+| `device_id`          | Device                     | ✅ Yes   | The Vestaboard device(s) to send the message to, including virtual Vestaboards and Note arrays. Supports multiple devices.                                                        |
 | `message`            | Message                    | No       | Plain text message to display. Supports multiline input.                                                                                                                          |
 | `justify`            | Justify                    | No       | Horizontal text alignment. Default: `center`. Options: `left`, `right`, `center`, `justified`.                                                                                    |
 | `align`              | Align                      | No       | Vertical text alignment. Default: `center`. Options: `top`, `bottom`, `center`, `justified`.                                                                                      |
@@ -175,6 +229,7 @@ data:
 - Either `message` or `vbml` should be provided, but not both. `vbml` takes precedence if both are given.
 - `step_size` and `step_interval_ms` only apply when a `strategy` is specified.
 - `duration` is useful for transient alerts - the board will restore its last persistent message automatically after the duration expires.
+- Messages are laid out to fit each target's size, so the same `message` or `vbml` fits a Flagship, a Note or a whole Note array. VBML component sizes are checked against each target.
 
 ---
 
