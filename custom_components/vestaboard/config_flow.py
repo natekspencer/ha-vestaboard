@@ -90,37 +90,44 @@ STEP_VIRTUAL_SCHEMA = vol.Schema(
     }
 )
 COLOR_SCHEMA = vol.In({COLOR_BLACK: "Black", COLOR_WHITE: "White"})
-OPTIONS_SCHEMA = vol.Schema(
+# Display options come first, then the default transition
+TRANSITION_OPTIONS = {
+    vol.Optional(CONF_STRATEGY): section(
+        vol.Schema(
+            {
+                vol.Required(CONF_STRATEGY): vol.In(CONF_TRANSITIONS),
+                vol.Optional(CONF_STEP_SIZE): NumberSelector(
+                    NumberSelectorConfig(
+                        min=1,
+                        max=132,
+                        step=1,
+                        unit_of_measurement="columns/rows/bits",
+                    )
+                ),
+                vol.Optional(CONF_STEP_INTERVAL_MS): NumberSelector(
+                    NumberSelectorConfig(
+                        min=1, max=3000, step=1, unit_of_measurement="milliseconds"
+                    )
+                ),
+            }
+        )
+    ),
+}
+BOARD_OPTIONS_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_MODEL, default=COLOR_BLACK): COLOR_SCHEMA,
-        vol.Optional(CONF_STRATEGY): section(
-            vol.Schema(
-                {
-                    vol.Required(CONF_STRATEGY): vol.In(CONF_TRANSITIONS),
-                    vol.Optional(CONF_STEP_SIZE): NumberSelector(
-                        NumberSelectorConfig(
-                            min=1,
-                            max=132,
-                            step=1,
-                            unit_of_measurement="columns/rows/bits",
-                        )
-                    ),
-                    vol.Optional(CONF_STEP_INTERVAL_MS): NumberSelector(
-                        NumberSelectorConfig(
-                            min=1, max=3000, step=1, unit_of_measurement="milliseconds"
-                        )
-                    ),
-                }
-            )
-        ),
+        vol.Optional(CONF_SHOW_FRAME, default=True): bool,
+        **TRANSITION_OPTIONS,
     }
 )
-BOARD_OPTIONS_SCHEMA = OPTIONS_SCHEMA.extend(
-    {vol.Optional(CONF_SHOW_FRAME, default=True): bool}
-)
 # Newer Flagships have a heart in place of the degree sign, as Notes always do
-FLAGSHIP_OPTIONS_SCHEMA = BOARD_OPTIONS_SCHEMA.extend(
-    {vol.Optional(CONF_HEART, default=False): bool}
+FLAGSHIP_OPTIONS_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_MODEL, default=COLOR_BLACK): COLOR_SCHEMA,
+        vol.Optional(CONF_HEART, default=False): bool,
+        vol.Optional(CONF_SHOW_FRAME, default=True): bool,
+        **TRANSITION_OPTIONS,
+    }
 )
 
 
@@ -141,8 +148,8 @@ async def _board_options_schema(handler: SchemaCommonFlowHandler) -> vol.Schema:
 OPTIONS_FLOW = {"init": SchemaFlowFormStep(_board_options_schema)}
 # Arrays have no color of their own; each board in the array uses its own color
 ARRAY_OPTIONS_SCHEMA = vol.Schema(
-    {key: value for key, value in OPTIONS_SCHEMA.schema.items() if key != CONF_MODEL}
-).extend({vol.Optional(CONF_SHOW_FRAME, default=False): bool})
+    {vol.Optional(CONF_SHOW_FRAME, default=False): bool, **TRANSITION_OPTIONS}
+)
 ARRAY_OPTIONS_FLOW = {"init": SchemaFlowFormStep(ARRAY_OPTIONS_SCHEMA)}
 
 VESTABOARD_CONNECTED_MESSAGE = [

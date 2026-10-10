@@ -99,8 +99,8 @@ Use **Reconfigure** on the array to change its name, arrangement or Notes. If a 
 After a Vestaboard is set up, open its **Configure** dialog to change the following. Color and the heart are chosen during setup and can be changed here later.
 
 - **Color** (boards only) — the color of your Vestaboard (black or white), used for the generated image. Each Note in an array is drawn in its own color.
-- **Show frame** — draw the image with the Vestaboard's frame and logo. When off, only the bits are drawn, edge to edge. This is on by default for boards. Arrays are drawn as one continuous, frameless board by default; turning this on draws each Note in its own frame.
 - **Heart in place of degree sign** (Flagships only) — newer Vestaboard Flagships ship with a ❤️ on the bit that older ones show as °. Turn this on if yours does, so the image and message sensor show a heart. Vestaboard Notes always show a heart.
+- **Show frame** — draw the image with the Vestaboard's frame and logo. When off, only the bits are drawn, edge to edge. This is on by default for boards. Arrays are drawn as one continuous, frameless board by default; turning this on draws each Note in its own frame.
 - **Default transition** — the transition strategy, step size and step interval used when a message doesn't set its own. See [Transition Strategy](#transition-strategy).
 
 |            |                                         Black                                         |                                         White                                         |
