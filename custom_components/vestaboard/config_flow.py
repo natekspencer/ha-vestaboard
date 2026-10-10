@@ -421,7 +421,10 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_appearance(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Choose the board's color, and for Flagships whether it has the heart.
+        """Choose how the board's image looks.
+
+        That's its color, for Flagships whether it has the heart, and whether
+        the image shows the board's frame.
 
         These are saved as options, so they can be changed later.
         """
@@ -432,11 +435,13 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
                 options=user_input,
             )
 
-        schema = vol.Schema(
-            {vol.Required(CONF_MODEL, default=COLOR_BLACK): COLOR_SCHEMA}
-        )
+        fields: dict[vol.Marker, Any] = {
+            vol.Required(CONF_MODEL, default=COLOR_BLACK): COLOR_SCHEMA
+        }
         if self.board_model == MODEL_FLAGSHIP:
-            schema = schema.extend({vol.Required(CONF_HEART, default=False): bool})
+            fields[vol.Required(CONF_HEART, default=False)] = bool
+        fields[vol.Required(CONF_SHOW_FRAME, default=True)] = bool
+        schema = vol.Schema(fields)
         return self.async_show_form(
             step_id="appearance",
             data_schema=schema,
