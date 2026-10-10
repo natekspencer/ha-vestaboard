@@ -101,6 +101,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: VestaboardConfigEntry) -
 
     @callback
     def _async_on_state_change() -> None:
+        """Reload arrays using this board once it's loaded again."""
         if entry.state is ConfigEntryState.LOADED:
             _async_reload_arrays_with_member(hass, entry.entry_id)
 
@@ -174,6 +175,7 @@ def _async_save_virtual_message(
 
     @callback
     def _async_persistent_message_changed(message: list[list[int]]) -> None:
+        """Save the virtual board's new persistent message, after a short delay."""
         if message == latest["message"]:
             return
         latest["message"] = message

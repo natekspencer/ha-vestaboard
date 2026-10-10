@@ -317,6 +317,7 @@ const STYLE = `
   .hidden { display: none !important; }
 `;
 
+/** Load the Vestaboard font on the page, once. */
 function ensureFont(url) {
   if (!url || document.getElementById("vestaboard-composer-font")) return;
   const style = document.createElement("style");
@@ -326,14 +327,17 @@ function ensureFont(url) {
   document.head.appendChild(style);
 }
 
+/** Return a grid of blank bits. */
 function blankGrid(rows, columns) {
   return Array.from({ length: rows }, () => new Array(columns).fill(BLANK_CODE));
 }
 
+/** Return a copy of a grid that can be changed without affecting the original. */
 function copyGrid(grid) {
   return grid.map((row) => row.slice());
 }
 
+/** Return whether two grids hold the same codes. */
 function sameGrid(a, b) {
   return (
     Array.isArray(a) &&
@@ -343,10 +347,12 @@ function sameGrid(a, b) {
   );
 }
 
+/** Return whether every bit in a grid is blank. */
 function isBlank(grid) {
   return grid.every((row) => row.every((code) => code === BLANK_CODE));
 }
 
+/** Return whether a grid has the given number of rows and columns. */
 function sameSize(grid, rows, columns) {
   return (
     Array.isArray(grid) &&
@@ -355,6 +361,7 @@ function sameSize(grid, rows, columns) {
   );
 }
 
+/** Return the draft saved in this browser for a board, if any. */
 function readDraft(deviceId) {
   try {
     const raw = window.localStorage.getItem(DRAFT_PREFIX + deviceId);
@@ -364,6 +371,7 @@ function readDraft(deviceId) {
   }
 }
 
+/** Save a board's draft in this browser. */
 function writeDraft(deviceId, draft) {
   try {
     window.localStorage.setItem(DRAFT_PREFIX + deviceId, JSON.stringify(draft));
@@ -373,6 +381,7 @@ function writeDraft(deviceId, draft) {
 }
 
 class VestaboardComposerPanel extends HTMLElement {
+  /** Set up the panel's state; the page is drawn once Home Assistant is set. */
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
@@ -410,6 +419,7 @@ class VestaboardComposerPanel extends HTMLElement {
     this._onShortcut = this._onShortcut.bind(this);
   }
 
+  /** Receive Home Assistant, and draw the panel and load the boards the first time. */
   set hass(hass) {
     this._hass = hass;
     if (this._menuButton) this._menuButton.hass = hass;
@@ -420,16 +430,19 @@ class VestaboardComposerPanel extends HTMLElement {
     }
   }
 
+  /** Receive whether the panel is narrow, for the sidebar menu button. */
   set narrow(narrow) {
     this._narrow = narrow;
     if (this._menuButton) this._menuButton.narrow = narrow;
   }
 
+  /** Receive the panel's configuration, which has the font's URL. */
   set panel(panel) {
     this._panel = panel;
     ensureFont(panel?.config?.font_url);
   }
 
+  /** Start resizing the board with the panel, and listening for shortcuts. */
   connectedCallback() {
     if (!this._resizeObserver) {
       this._resizeObserver = new ResizeObserver(() => this._sizeBoard());
@@ -439,6 +452,7 @@ class VestaboardComposerPanel extends HTMLElement {
     window.addEventListener("keydown", this._onShortcut);
   }
 
+  /** Stop resizing the board and listening for shortcuts. */
   disconnectedCallback() {
     this._resizeObserver?.disconnect();
     window.removeEventListener("keydown", this._onShortcut);
@@ -446,6 +460,7 @@ class VestaboardComposerPanel extends HTMLElement {
 
   // ---- Data -------------------------------------------------------------
 
+  /** Load the boards and how to draw them, keeping the selected board if asked. */
   async _loadBoards(keepSelection = false) {
     let result;
     try {
@@ -487,6 +502,7 @@ class VestaboardComposerPanel extends HTMLElement {
     this._selectBoard(board.device_id);
   }
 
+  /** Show a board, restoring its draft if there is one. */
   _selectBoard(deviceId) {
     const board = this._boards.find((b) => b.device_id === deviceId);
     if (!board) return;
@@ -525,6 +541,7 @@ class VestaboardComposerPanel extends HTMLElement {
     if (this._mode === "text") this._syncText();
   }
 
+  /** Save the selected board's draft in this browser. */
   _saveDraft() {
     if (!this._board) return;
     writeDraft(this._board.device_id, {
@@ -536,6 +553,7 @@ class VestaboardComposerPanel extends HTMLElement {
     });
   }
 
+  /** Return the color theme of the board a bit belongs to. */
   _themeAt(row, column) {
     const board = this._board;
     const color =
@@ -547,6 +565,7 @@ class VestaboardComposerPanel extends HTMLElement {
 
   // ---- Rendering --------------------------------------------------------
 
+  /** Draw the panel and connect its controls. */
   _render() {
     const root = this.shadowRoot;
     root.innerHTML = `
@@ -701,6 +720,7 @@ class VestaboardComposerPanel extends HTMLElement {
     this._setMode(this._mode);
   }
 
+  /** Replace a select's options with [value, label] pairs. */
   _fillSelect(select, options) {
     select.replaceChildren(
       ...options.map(([value, label]) => {
@@ -712,6 +732,7 @@ class VestaboardComposerPanel extends HTMLElement {
     );
   }
 
+  /** Add toggle buttons for the justify or align options. */
   _fillAlignment(container, options, property) {
     container.replaceChildren(
       ...options.map(([value, label, icon]) => {
@@ -732,6 +753,7 @@ class VestaboardComposerPanel extends HTMLElement {
     this._renderAlignment();
   }
 
+  /** Show which justify and align options are selected. */
   _renderAlignment() {
     for (const [container, value] of [
       [this._justifyButtons, this._justify],
@@ -745,6 +767,7 @@ class VestaboardComposerPanel extends HTMLElement {
     }
   }
 
+  /** List the boards in the board picker. */
   _renderBoardPicker() {
     this._fillSelect(
       this._picker,
@@ -752,11 +775,13 @@ class VestaboardComposerPanel extends HTMLElement {
     );
   }
 
+  /** Show the message for when no boards are loaded, or the composer. */
   _showEmpty(empty) {
     this._empty.classList.toggle("hidden", !empty);
     this._composer.classList.toggle("hidden", empty);
   }
 
+  /** Describe the selected board, and warn if quiet hours will skip a message. */
   _updateBoardNotes() {
     const board = this._board;
     if (!board) return;
@@ -777,6 +802,7 @@ class VestaboardComposerPanel extends HTMLElement {
     }
   }
 
+  /** Draw the Visual and Text mode palettes for the selected board. */
   _renderPalette() {
     if (!this._board) return;
     this._palette.replaceChildren(...this._swatches((code) => this._onPalette(code)));
@@ -790,6 +816,7 @@ class VestaboardComposerPanel extends HTMLElement {
     this._renderPaletteSelection();
   }
 
+  /** Return a swatch for each palette entry, calling onClick with its code. */
   _swatches(onClick) {
     const theme = this._themeAt(0, 0);
     return PALETTE.map((code) => {
@@ -814,6 +841,7 @@ class VestaboardComposerPanel extends HTMLElement {
     });
   }
 
+  /** Show which palette color the Pen and Fill tools use. */
   _renderPaletteSelection() {
     this._palette.querySelectorAll(".swatch").forEach((swatch) => {
       swatch.classList.toggle(
@@ -823,6 +851,7 @@ class VestaboardComposerPanel extends HTMLElement {
     });
   }
 
+  /** Create the bits for the selected board, in its frame or as one board. */
   _buildBoard() {
     const board = this._board;
     const tileRows = board.colors.length;
@@ -878,6 +907,7 @@ class VestaboardComposerPanel extends HTMLElement {
     this._renderGrid();
   }
 
+  /** Size the board to fit the panel, keeping its physical proportions. */
   _sizeBoard() {
     const board = this._board;
     if (!board || !this._stage) return;
@@ -913,6 +943,7 @@ class VestaboardComposerPanel extends HTMLElement {
     style.setProperty("--logo-bottom", px(frame.height - frame.thickness - frame.logo.descender));
   }
 
+  /** Draw every bit from the grid. */
   _renderGrid() {
     for (let row = 0; row < this._grid.length; row++) {
       for (let column = 0; column < this._grid[row].length; column++) {
@@ -922,6 +953,7 @@ class VestaboardComposerPanel extends HTMLElement {
     this._renderCursor();
   }
 
+  /** Draw one bit as a character, color or heart. */
   _renderCell(row, column) {
     const cell = this._cells[row]?.[column];
     if (!cell) return;
@@ -943,6 +975,7 @@ class VestaboardComposerPanel extends HTMLElement {
     }
   }
 
+  /** Return an image of the heart as the board image draws it. */
   _heartElement() {
     const img = document.createElement("img");
     img.src = this._heartImage;
@@ -951,6 +984,7 @@ class VestaboardComposerPanel extends HTMLElement {
     return img;
   }
 
+  /** Show the typing cursor while typing on the board. */
   _renderCursor() {
     this._boardsEl
       .querySelectorAll(".bit.cursor")
@@ -964,11 +998,13 @@ class VestaboardComposerPanel extends HTMLElement {
     }
   }
 
+  /** Enable Undo and Redo when there's something to undo or redo. */
   _updateHistoryButtons() {
     this._undoButton.disabled = !this._history.length;
     this._redoButton.disabled = !this._future.length;
   }
 
+  /** Show a status message, styled by kind: error, warning or success. */
   _setStatus(message, kind = "") {
     this._status.textContent = message;
     this._status.className = `status ${kind}`;
@@ -976,6 +1012,7 @@ class VestaboardComposerPanel extends HTMLElement {
 
   // ---- Modes and tools --------------------------------------------------
 
+  /** Switch between Visual and Text mode, keeping the board and message in step. */
   _setMode(mode) {
     if (mode !== "text" && this._layoutTimer) {
       // Lay out the latest edits now, so they're on the board in Visual mode
@@ -997,6 +1034,7 @@ class VestaboardComposerPanel extends HTMLElement {
     this._renderCursor();
   }
 
+  /** Pick the Visual mode tool: type, pen, fill or eraser. */
   _setTool(tool) {
     this._tool = tool;
     this.shadowRoot
@@ -1014,6 +1052,7 @@ class VestaboardComposerPanel extends HTMLElement {
     this._renderCursor();
   }
 
+  /** Insert a palette entry while typing, or pick it for the Pen and Fill tools. */
   _onPalette(code) {
     if (this._tool === "type") {
       this._typeCodes([code]);
@@ -1027,6 +1066,7 @@ class VestaboardComposerPanel extends HTMLElement {
 
   // ---- Editing ----------------------------------------------------------
 
+  /** Save the grid for undo, once for a run of the same action. */
   _pushHistory(action) {
     if (action && action === this._lastAction) return;
     this._history.push(copyGrid(this._grid));
@@ -1036,23 +1076,27 @@ class VestaboardComposerPanel extends HTMLElement {
     this._updateHistoryButtons();
   }
 
+  /** Save the draft and update Undo and Redo after the grid changes. */
   _changed() {
     this._saveDraft();
     this._updateHistoryButtons();
   }
 
+  /** Set and draw one bit's code. */
   _setCode(row, column, code) {
     if (this._grid[row]?.[column] === undefined || this._grid[row][column] === code) return;
     this._grid[row][column] = code;
     this._renderCell(row, column);
   }
 
+  /** Replace and draw the whole grid. */
   _setGrid(grid) {
     this._grid = copyGrid(grid);
     this._renderGrid();
     this._changed();
   }
 
+  /** Undo the last change to the grid. */
   _undo() {
     if (!this._history.length) return;
     this._future.push(copyGrid(this._grid));
@@ -1060,6 +1104,7 @@ class VestaboardComposerPanel extends HTMLElement {
     this._setGrid(this._history.pop());
   }
 
+  /** Redo the last undone change to the grid. */
   _redo() {
     if (!this._future.length) return;
     this._history.push(copyGrid(this._grid));
@@ -1067,11 +1112,13 @@ class VestaboardComposerPanel extends HTMLElement {
     this._setGrid(this._future.pop());
   }
 
+  /** Blank the grid. */
   _clear() {
     this._pushHistory();
     this._setGrid(blankGrid(this._board.rows, this._board.columns));
   }
 
+  /** Replace the grid with what the board is showing. */
   async _loadCurrent() {
     await this._loadBoards(true);
     if (!this._board) return;
@@ -1080,6 +1127,7 @@ class VestaboardComposerPanel extends HTMLElement {
     this._setStatus("Loaded what the board is showing.", "success");
   }
 
+  /** Fill the bits matching this one, and those around them, with a code. */
   _fill(row, column, code) {
     const target = this._grid[row][column];
     if (target === code) return;
@@ -1092,6 +1140,7 @@ class VestaboardComposerPanel extends HTMLElement {
     }
   }
 
+  /** Return the row and column of the bit under a pointer, if any. */
   _cellFromEvent(ev) {
     const element = this.shadowRoot.elementFromPoint(ev.clientX, ev.clientY);
     const cell = element?.closest?.(".bit");
@@ -1099,6 +1148,7 @@ class VestaboardComposerPanel extends HTMLElement {
     return { row: Number(cell.dataset.row), column: Number(cell.dataset.column) };
   }
 
+  /** Place the typing cursor, fill, or start painting at the bit pressed. */
   _onPointerDown(ev) {
     if (!this._board || ev.button > 0) return;
     const cell = this._cellFromEvent(ev);
@@ -1126,12 +1176,14 @@ class VestaboardComposerPanel extends HTMLElement {
     this._paint(cell);
   }
 
+  /** Paint the bits a pointer drags across. */
   _onPointerMove(ev) {
     if (!this._painting) return;
     const cell = this._cellFromEvent(ev);
     if (cell) this._paint(cell);
   }
 
+  /** Finish painting. */
   _onPointerUp() {
     if (!this._painting) return;
     this._painting = false;
@@ -1139,10 +1191,12 @@ class VestaboardComposerPanel extends HTMLElement {
     this._changed();
   }
 
+  /** Paint one bit with the Pen's color, or clear it with the Eraser. */
   _paint({ row, column }) {
     this._setCode(row, column, this._tool === "eraser" ? BLANK_CODE : this._code);
   }
 
+  /** Return the character codes for text, skipping characters a board can't show. */
   _codesFor(text) {
     const codes = [];
     for (const char of text) {
@@ -1154,6 +1208,7 @@ class VestaboardComposerPanel extends HTMLElement {
     return codes;
   }
 
+  /** Type codes at the cursor, moving it along and onto the next row. */
   _typeCodes(codes) {
     if (!codes.length) return;
     this._pushHistory("type");
@@ -1170,6 +1225,7 @@ class VestaboardComposerPanel extends HTMLElement {
     this._renderCursor();
   }
 
+  /** Clear the bit before the cursor and move back to it. */
   _backspace() {
     const { columns } = this._board;
     if (this._cursor.column > 0) {
@@ -1185,6 +1241,7 @@ class VestaboardComposerPanel extends HTMLElement {
     this._renderCursor();
   }
 
+  /** Move the typing cursor, keeping it on the board. */
   _moveCursor(rowDelta, columnDelta) {
     const { rows, columns } = this._board;
     this._cursor = {
@@ -1195,6 +1252,7 @@ class VestaboardComposerPanel extends HTMLElement {
     this._renderCursor();
   }
 
+  /** Handle arrow keys, Backspace, Delete, Enter and Escape while typing. */
   _onKeyDown(ev) {
     if (!this._board || ev.ctrlKey || ev.metaKey || ev.altKey) return;
     const handlers = {
@@ -1226,6 +1284,7 @@ class VestaboardComposerPanel extends HTMLElement {
     }
   }
 
+  /** Handle deletions from phone keyboards while typing. */
   _onBeforeInput(ev) {
     // Phone keyboards send deletions as input events rather than key presses
     if (ev.inputType?.startsWith("delete")) {
@@ -1234,12 +1293,14 @@ class VestaboardComposerPanel extends HTMLElement {
     }
   }
 
+  /** Type what was entered at the cursor. */
   _onInput() {
     const text = this._keys.value;
     this._keys.value = "";
     this._typeCodes(this._codesFor(text));
   }
 
+  /** Handle Ctrl+Z, Ctrl+Shift+Z and Ctrl+Y in Visual mode. */
   _onShortcut(ev) {
     if (!(ev.ctrlKey || ev.metaKey) || this._mode !== "visual" || !this._board) return;
     // Leave undo in other text fields, such as Home Assistant dialogs, alone
@@ -1260,6 +1321,7 @@ class VestaboardComposerPanel extends HTMLElement {
 
   // ---- Text mode --------------------------------------------------------
 
+  /** Show the message on the board, or start the message from the board. */
   _syncText() {
     // Keep the message and the board in step when Text mode opens
     if (this._textGrid && sameGrid(this._grid, this._textGrid)) return;
@@ -1275,6 +1337,7 @@ class VestaboardComposerPanel extends HTMLElement {
     this._saveDraft();
   }
 
+  /** Return a message for what a grid shows, one line per row. */
   _gridText(grid) {
     const lines = grid.map((row) =>
       row
@@ -1293,6 +1356,7 @@ class VestaboardComposerPanel extends HTMLElement {
     return lines.join("\n");
   }
 
+  /** Insert a palette entry into the message at its cursor. */
   _insertIntoMessage(code) {
     const token =
       code === HEART_CODE ? (this._board.heart ? "❤️" : "°") : TEXT_TOKENS[code];
@@ -1305,6 +1369,7 @@ class VestaboardComposerPanel extends HTMLElement {
     this._scheduleLayout();
   }
 
+  /** Lay out the message shortly after the latest edit. */
   _scheduleLayout() {
     this._saveDraft();
     clearTimeout(this._layoutTimer);
@@ -1314,6 +1379,7 @@ class VestaboardComposerPanel extends HTMLElement {
     }, LAYOUT_DELAY_MS);
   }
 
+  /** Lay out the message on the board now, tracking it until it's done. */
   _layout() {
     const promise = this._runLayout();
     this._layoutPromise = promise;
@@ -1361,6 +1427,7 @@ class VestaboardComposerPanel extends HTMLElement {
 
   // ---- Sending ----------------------------------------------------------
 
+  /** Send the board's message, after laying out any Text mode edits. */
   async _send() {
     if (!this._board) return;
     // The board Send was clicked for, in case another is picked meanwhile
