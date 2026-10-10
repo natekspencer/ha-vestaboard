@@ -7,11 +7,17 @@ from homeassistant.helpers.entity import DeviceInfo, EntityDescription
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, ENTRY_TYPE_DEVICE, ENTRY_TYPE_VIRTUAL
-from .coordinator import VestaboardConfigEntry, VestaboardCoordinator
+from .coordinator import (
+    VestaboardArrayCoordinator,
+    VestaboardConfigEntry,
+    VestaboardCoordinator,
+)
 from .helpers import get_entry_type
 
 
-class VestaboardEntity(CoordinatorEntity[VestaboardCoordinator]):
+class VestaboardEntity(
+    CoordinatorEntity[VestaboardCoordinator | VestaboardArrayCoordinator]
+):
     """Base class for Vestaboard entities."""
 
     _attr_has_entity_name = True
@@ -36,7 +42,7 @@ class VestaboardEntity(CoordinatorEntity[VestaboardCoordinator]):
             name=entry.title,
             manufacturer="Vestaboard",
             model=model,
-            sw_version=coordinator.vestaboard.firmware_version,
+            sw_version=coordinator.firmware_version,
         )
         if entry.unique_id and entry_type == ENTRY_TYPE_DEVICE:
             mac = format_mac(entry.unique_id)

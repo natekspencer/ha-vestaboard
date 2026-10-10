@@ -15,12 +15,16 @@ ALIGN_HORIZONTAL: Final = [ALIGN_LEFT, ALIGN_RIGHT, ALIGN_CENTER, ALIGN_JUSTIFIE
 ALIGN_VERTICAL: Final = [ALIGN_TOP, ALIGN_BOTTOM, ALIGN_CENTER, ALIGN_JUSTIFIED]
 
 CONF_ALIGN: Final = "align"
+CONF_ARRANGEMENT: Final = "arrangement"
+CONF_BOARD: Final = "board"
 CONF_BOARD_MODEL: Final = "board_model"
 CONF_BYPASS_QUIET_HOURS: Final = "bypass_quiet_hours"
 CONF_DURATION: Final = "duration"
 CONF_ENABLEMENT_TOKEN: Final = "enablement_token"
 CONF_ENTRY_TYPE: Final = "entry_type"
+CONF_IDENTIFY: Final = "identify"
 CONF_JUSTIFY: Final = "justify"
+CONF_LAYOUT: Final = "layout"
 CONF_MESSAGE: Final = "message"
 CONF_MODEL: Final = "model"
 CONF_QUIET_END: Final = "quiet_end"
@@ -42,6 +46,7 @@ CONF_VBML: Final = "vbml"
 
 DATA_HASS_CONFIG: Final = "hass_config"
 
+ENTRY_TYPE_ARRAY: Final = "array"
 ENTRY_TYPE_DEVICE: Final = "device"
 ENTRY_TYPE_VIRTUAL: Final = "virtual"
 
