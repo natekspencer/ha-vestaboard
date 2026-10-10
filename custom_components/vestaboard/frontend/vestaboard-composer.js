@@ -7,7 +7,7 @@
 const HEART_CODE = 62;
 const BLANK_CODE = 0;
 const COLOR_CODES = [63, 64, 65, 66, 67, 68, 69, 70, 71];
-const PALETTE = [HEART_CODE, ...COLOR_CODES];
+const PALETTE = [63, 64, 65, 66, 67, 68, 69, 70, HEART_CODE];
 const COLOR_NAMES = {
   "#DA291C": "Red",
   "#FA7400": "Orange",
@@ -82,6 +82,8 @@ const STYLE = `
     border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
     padding: 16px;
   }
+  .editor { display: flex; flex-direction: column; gap: 12px; }
+  .editor .modes { align-self: flex-start; }
   .row {
     display: flex;
     flex-wrap: wrap;
@@ -512,34 +514,6 @@ class VestaboardComposerPanel extends HTMLElement {
                   <span class="hint board-notes"></span>
                 </div>
               </div>
-              <div class="spacer"></div>
-              <div class="segmented modes">
-                <button data-mode="visual"><ha-icon icon="mdi:grid"></ha-icon>Visual</button>
-                <button data-mode="text"><ha-icon icon="mdi:text"></ha-icon>Text</button>
-              </div>
-            </div>
-          </div>
-
-          <div class="card visual-tools">
-            <div class="row">
-              <div class="segmented tools"></div>
-              <div class="palette"></div>
-              <div class="spacer"></div>
-              <button class="icon undo" title="Undo (Ctrl+Z)"><ha-icon icon="mdi:undo"></ha-icon></button>
-              <button class="icon redo" title="Redo (Ctrl+Shift+Z)"><ha-icon icon="mdi:redo"></ha-icon></button>
-              <button class="clear"><ha-icon icon="mdi:delete-outline"></ha-icon>Clear</button>
-              <button class="load"><ha-icon icon="mdi:download"></ha-icon>Load current</button>
-            </div>
-            <div class="hint tool-hint" style="margin-top: 8px"></div>
-          </div>
-
-          <div class="card text-tools hidden">
-            <textarea class="message" placeholder="Type a message and it's laid out across the board"></textarea>
-            <div class="row" style="margin-top: 8px">
-              <label class="field">Justify<select class="justify"></select></label>
-              <label class="field">Align<select class="align"></select></label>
-              <div class="spacer"></div>
-              <span class="hint">Switch to Visual to fine-tune the layout.</span>
             </div>
           </div>
 
@@ -548,6 +522,35 @@ class VestaboardComposerPanel extends HTMLElement {
               <div class="boards" tabindex="-1"></div>
             </div>
             <textarea class="keys" autocapitalize="characters" autocomplete="off" spellcheck="false"></textarea>
+          </div>
+
+          <div class="card editor">
+            <div class="segmented modes">
+              <button data-mode="visual"><ha-icon icon="mdi:grid"></ha-icon>Visual</button>
+              <button data-mode="text"><ha-icon icon="mdi:text"></ha-icon>Text</button>
+            </div>
+            <div class="visual-tools">
+              <div class="row">
+                <div class="segmented tools"></div>
+                <div class="palette"></div>
+                <div class="spacer"></div>
+                <button class="icon undo" title="Undo (Ctrl+Z)"><ha-icon icon="mdi:undo"></ha-icon></button>
+                <button class="icon redo" title="Redo (Ctrl+Shift+Z)"><ha-icon icon="mdi:redo"></ha-icon></button>
+                <button class="clear"><ha-icon icon="mdi:delete-outline"></ha-icon>Clear</button>
+                <button class="load"><ha-icon icon="mdi:download"></ha-icon>Load current</button>
+              </div>
+              <div class="hint tool-hint" style="margin-top: 8px"></div>
+            </div>
+
+            <div class="text-tools hidden">
+              <textarea class="message" placeholder="Type a message and it's laid out across the board"></textarea>
+              <div class="row" style="margin-top: 8px">
+                <label class="field">Justify<select class="justify"></select></label>
+                <label class="field">Align<select class="align"></select></label>
+                <div class="spacer"></div>
+                <span class="hint">Switch to Visual to fine-tune the layout.</span>
+              </div>
+            </div>
           </div>
 
           <div class="card">
@@ -706,8 +709,7 @@ class VestaboardComposerPanel extends HTMLElement {
           chip.className = "chip";
           chip.style.background = theme.colors[code];
           swatch.appendChild(chip);
-          swatch.title =
-            code === 71 ? "Filled" : COLOR_NAMES[theme.colors[code].toUpperCase()] || `Color ${code}`;
+          swatch.title = COLOR_NAMES[theme.colors[code].toUpperCase()] || `Color ${code}`;
         }
         swatch.addEventListener("click", () => this._onPalette(code));
         return swatch;
@@ -1193,8 +1195,10 @@ class VestaboardComposerPanel extends HTMLElement {
 
   async _send() {
     if (!this._board) return;
+    // Another board may be selected while this one is being sent to
+    const { device_id: deviceId, name } = this._board;
     const data = {
-      device_id: this._board.device_id,
+      device_id: deviceId,
       vbml: { components: [{ rawCharacters: this._grid }] },
     };
     if (this._strategySelect.value) data.strategy = this._strategySelect.value;
@@ -1215,8 +1219,8 @@ class VestaboardComposerPanel extends HTMLElement {
       // The action doesn't report whether quiet hours skipped the message
       this._setStatus(
         data.bypass_quiet_hours
-          ? `Submitted to ${this._board.name}.`
-          : `Submitted to ${this._board.name}. Quiet hours may skip it.`,
+          ? `Submitted to ${name}.`
+          : `Submitted to ${name}. Quiet hours may skip it.`,
         "success"
       );
     } catch (err) {
