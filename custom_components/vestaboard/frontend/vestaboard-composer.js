@@ -114,6 +114,13 @@ const STYLE = `
     gap: 8px 16px;
   }
   .spacer { flex: 1; }
+  /* Kept together and to the right, even when they wrap below the tools */
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-left: auto;
+  }
   .field {
     display: flex;
     flex-direction: column;
@@ -138,6 +145,7 @@ const STYLE = `
     padding: 8px 10px;
   }
   select { min-width: 160px; }
+  input.duration { width: 150px; box-sizing: border-box; }
   textarea.message {
     width: 100%;
     min-height: 96px;
@@ -577,11 +585,12 @@ class VestaboardComposerPanel extends HTMLElement {
               <div class="row">
                 <div class="segmented tools"></div>
                 <div class="palette"></div>
-                <div class="spacer"></div>
-                <button class="icon undo" title="Undo (Ctrl+Z)"><ha-icon icon="mdi:undo"></ha-icon></button>
-                <button class="icon redo" title="Redo (Ctrl+Shift+Z)"><ha-icon icon="mdi:redo"></ha-icon></button>
-                <button class="clear"><ha-icon icon="mdi:delete-outline"></ha-icon>Clear</button>
-                <button class="load"><ha-icon icon="mdi:download"></ha-icon>Load current</button>
+                <div class="actions">
+                  <button class="icon undo" title="Undo (Ctrl+Z)"><ha-icon icon="mdi:undo"></ha-icon></button>
+                  <button class="icon redo" title="Redo (Ctrl+Shift+Z)"><ha-icon icon="mdi:redo"></ha-icon></button>
+                  <button class="clear"><ha-icon icon="mdi:delete-outline"></ha-icon>Clear</button>
+                  <button class="load"><ha-icon icon="mdi:download"></ha-icon>Load current</button>
+                </div>
               </div>
               <div class="hint tool-hint" style="margin-top: 8px"></div>
             </div>
