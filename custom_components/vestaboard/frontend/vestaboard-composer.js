@@ -502,6 +502,7 @@ class VestaboardComposerPanel extends HTMLElement {
     const draft = readDraft(deviceId);
     if (draft && sameSize(draft.grid, board.rows, board.columns)) {
       this._grid = draft.grid;
+      this._textGrid = sameSize(draft.textGrid, board.rows, board.columns) ? draft.textGrid : null;
       this._text = draft.text || "";
       this._justify = draft.justify || "center";
       this._align = draft.align || "center";
@@ -526,6 +527,7 @@ class VestaboardComposerPanel extends HTMLElement {
     if (!this._board) return;
     writeDraft(this._board.device_id, {
       grid: this._grid,
+      textGrid: this._textGrid,
       text: this._text,
       justify: this._justify,
       align: this._align,
@@ -1336,8 +1338,9 @@ class VestaboardComposerPanel extends HTMLElement {
       this._textPushed = true;
     }
     this._lastAction = null;
-    this._setGrid(result.characters);
+    // Set before the grid, which saves the draft
     this._textGrid = copyGrid(result.characters);
+    this._setGrid(result.characters);
     if (this._status.classList.contains("error")) this._setStatus("");
   }
 
