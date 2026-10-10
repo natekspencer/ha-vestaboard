@@ -1431,7 +1431,9 @@ class VestaboardComposerPanel extends HTMLElement {
         align: this._align,
       });
     } catch (err) {
-      if (request === this._layoutRequest) {
+      // A failure doesn't matter once the board has been edited meanwhile:
+      // the edited board is what's sent, as with a successful layout
+      if (request === this._layoutRequest && this._gridRevision === revision) {
         this._textLaidOut = false;
         this._textRevision = this._gridRevision;
         this._saveDraft();
