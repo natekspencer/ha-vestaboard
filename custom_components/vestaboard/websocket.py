@@ -53,13 +53,28 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_layout)
 
 
-def _render_assets() -> tuple[bytes, dict[str, dict[str, float]]]:
+DATA_COMPOSER_ASSETS = "composer_assets"
+
+
+def _render_assets() -> tuple[str, dict[str, dict[str, float]]]:
     """Render the heart and measure each model's logo, as the board image does."""
     logos = {
         model: logo_layout(VestaboardModel(COLOR_BLACK, model))
         for model in VestaboardModel.all_models()
     }
-    return emoji_png(HEART_EMOJI), logos
+    heart = base64.b64encode(emoji_png(HEART_EMOJI)).decode()
+    return f"data:image/png;base64,{heart}", logos
+
+
+async def _async_get_assets(
+    hass: HomeAssistant,
+) -> tuple[str, dict[str, dict[str, float]]]:
+    """Return the heart image and logo layouts, rendering them the first time."""
+    if (assets := hass.data[DOMAIN].get(DATA_COMPOSER_ASSETS)) is None:
+        # Loading fonts reads files, so do it outside the event loop
+        assets = await hass.async_add_executor_job(_render_assets)
+        hass.data[DOMAIN][DATA_COMPOSER_ASSETS] = assets
+    return assets
 
 
 def _board_info(
@@ -114,8 +129,7 @@ async def websocket_boards(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
     """List the loaded Vestaboards and arrays, with how to draw them."""
-    # Loading fonts reads files, so do it outside the event loop
-    heart, logos = await hass.async_add_executor_job(_render_assets)
+    heart, logos = await _async_get_assets(hass)
     device_registry = dr.async_get(hass)
     boards = []
     for entry in hass.config_entries.async_entries(DOMAIN):
@@ -152,7 +166,7 @@ async def websocket_boards(
             },
             # Index is the character code
             "characters": list(PRINTABLE),
-            "heart_image": f"data:image/png;base64,{base64.b64encode(heart).decode()}",
+            "heart_image": heart,
         },
     )
 
