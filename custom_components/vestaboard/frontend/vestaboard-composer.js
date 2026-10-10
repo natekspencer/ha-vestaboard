@@ -1315,12 +1315,18 @@ class VestaboardComposerPanel extends HTMLElement {
   }
 
   _layout() {
-    this._layoutPromise = this._runLayout();
-    return this._layoutPromise;
+    const promise = this._runLayout();
+    this._layoutPromise = promise;
+    promise.then(() => {
+      if (this._layoutPromise === promise) this._layoutPromise = null;
+    });
+    return promise;
   }
 
+  // Returns false if the layout failed, and true otherwise, including when a
+  // newer layout replaced it
   async _runLayout() {
-    if (!this._board) return;
+    if (!this._board) return true;
     const request = ++this._layoutRequest;
     const deviceId = this._board.device_id;
     let result;
@@ -1335,11 +1341,12 @@ class VestaboardComposerPanel extends HTMLElement {
     } catch (err) {
       if (request === this._layoutRequest) {
         this._setStatus(`Couldn't lay out the message: ${err.message || err}`, "error");
+        return false;
       }
-      return;
+      return true;
     }
     // Ignore a stale layout, or one for a board that's no longer selected
-    if (request !== this._layoutRequest || this._board?.device_id !== deviceId) return;
+    if (request !== this._layoutRequest || this._board?.device_id !== deviceId) return true;
     if (!this._textPushed) {
       this._pushHistory();
       this._textPushed = true;
@@ -1349,50 +1356,59 @@ class VestaboardComposerPanel extends HTMLElement {
     this._textGrid = copyGrid(result.characters);
     this._setGrid(result.characters);
     if (this._status.classList.contains("error")) this._setStatus("");
+    return true;
   }
 
   // ---- Sending ----------------------------------------------------------
 
   async _send() {
     if (!this._board) return;
-    // Send the latest Text mode edits, and don't let a layout land afterwards
-    if (this._layoutTimer) {
-      clearTimeout(this._layoutTimer);
-      this._layoutTimer = null;
-      this._layout();
-    }
-    await this._layoutPromise;
-    if (!this._board) return;
-    // Another board may be selected while this one is being sent to
+    // The board Send was clicked for, in case another is picked meanwhile
     const { device_id: deviceId, name } = this._board;
-    const data = {
-      device_id: deviceId,
-      vbml: { components: [{ rawCharacters: this._grid }] },
-    };
-    if (this._strategySelect.value) data.strategy = this._strategySelect.value;
-    const duration = Number(this._durationInput.value);
-    if (this._durationInput.value) {
-      if (!Number.isInteger(duration) || duration < 10 || duration > 43200) {
-        this._setStatus("Show for must be a whole number of seconds from 10 to 43200.", "error");
-        return;
-      }
-      data.duration = duration;
-    }
-    if (this._bypassInput.checked) data.bypass_quiet_hours = true;
-
     this._sendButton.disabled = true;
-    this._setStatus("Submitting…");
     try {
-      await this._hass.callService("vestaboard", "message", data);
-      // The action doesn't report whether quiet hours skipped the message
-      this._setStatus(
-        data.bypass_quiet_hours
-          ? `Submitted to ${name}.`
-          : `Submitted to ${name}. Quiet hours may skip it.`,
-        "success"
-      );
-    } catch (err) {
-      this._setStatus(`Couldn't send: ${err.message || err}`, "error");
+      // Lay out the latest Text mode edits, including any made while waiting,
+      // so no layout can change the board after it's sent
+      while (this._layoutTimer || this._layoutPromise) {
+        if (this._layoutTimer) {
+          clearTimeout(this._layoutTimer);
+          this._layoutTimer = null;
+          this._layout();
+        }
+        const laidOut = await this._layoutPromise;
+        if (this._board?.device_id !== deviceId) return;
+        // The layout's error is already showing
+        if (laidOut === false) return;
+      }
+
+      const data = {
+        device_id: deviceId,
+        vbml: { components: [{ rawCharacters: copyGrid(this._grid) }] },
+      };
+      if (this._strategySelect.value) data.strategy = this._strategySelect.value;
+      const duration = Number(this._durationInput.value);
+      if (this._durationInput.value) {
+        if (!Number.isInteger(duration) || duration < 10 || duration > 43200) {
+          this._setStatus("Show for must be a whole number of seconds from 10 to 43200.", "error");
+          return;
+        }
+        data.duration = duration;
+      }
+      if (this._bypassInput.checked) data.bypass_quiet_hours = true;
+
+      this._setStatus("Submitting…");
+      try {
+        await this._hass.callService("vestaboard", "message", data);
+        // The action doesn't report whether quiet hours skipped the message
+        this._setStatus(
+          data.bypass_quiet_hours
+            ? `Submitted to ${name}.`
+            : `Submitted to ${name}. Quiet hours may skip it.`,
+          "success"
+        );
+      } catch (err) {
+        this._setStatus(`Couldn't send: ${err.message || err}`, "error");
+      }
     } finally {
       this._sendButton.disabled = false;
     }
