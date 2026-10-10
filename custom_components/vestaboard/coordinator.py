@@ -227,10 +227,20 @@ class VestaboardCoordinator(DataUpdateCoordinator):
                 return
             if (restore := self._restore_after) and restore[1] > now:
                 characters, restore_expiration = restore
+                try:
+                    await self._async_write_temporary_message(
+                        {"characters": characters}, restore_expiration
+                    )
+                except Exception:
+                    # Don't leave the expired message showing
+                    _LOGGER.warning(
+                        "Unable to restore the previous temporary message, "
+                        "reverting to the persistent message",
+                        exc_info=True,
+                    )
+                    await self._async_revert_to_persistent_message()
+                    return
                 self._restore_after = None
-                await self._async_write_temporary_message(
-                    {"characters": characters}, restore_expiration
-                )
                 return
             _LOGGER.debug(
                 "Vestaboard temporary message expired @ %s, reverting to persistent message",
