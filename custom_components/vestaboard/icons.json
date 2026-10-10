@@ -4,6 +4,22 @@
       "message": {
         "default": "mdi:sign-text"
       }
+    },
+    "switch": {
+      "quiet_hours": {
+        "default": "mdi:sleep",
+        "state": {
+          "off": "mdi:sleep-off"
+        }
+      }
+    },
+    "time": {
+      "quiet_start": {
+        "default": "mdi:clock-start"
+      },
+      "quiet_end": {
+        "default": "mdi:clock-end"
+      }
     }
   },
   "services": {

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from typing import Any
+
+from homeassistant.core import callback
 from homeassistant.helpers.device_registry import CONNECTION_NETWORK_MAC, format_mac
 from homeassistant.helpers.entity import DeviceInfo, EntityDescription
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -48,3 +51,14 @@ class VestaboardEntity(
             mac = format_mac(entry.unique_id)
             device_info["connections"] = {(CONNECTION_NETWORK_MAC, mac)}
         self._attr_device_info = device_info
+
+    @callback
+    def _async_update_options(self, changes: dict[str, Any]) -> None:
+        """Update config entry options, e.g. from a configuration entity.
+
+        Quiet hours changes are applied without reloading the entry.
+        """
+        entry = self.coordinator.config_entry
+        self.hass.config_entries.async_update_entry(
+            entry, options={**entry.options, **changes}
+        )
