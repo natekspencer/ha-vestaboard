@@ -404,6 +404,8 @@ class VestaboardComposerPanel extends HTMLElement {
     this._painting = false;
     this._layoutTimer = null;
     this._layoutRequest = 0;
+    // The layout in flight, if any, so sending can wait for it
+    this._layoutPromise = null;
     this._cells = [];
     this._onShortcut = this._onShortcut.bind(this);
   }
@@ -1312,7 +1314,12 @@ class VestaboardComposerPanel extends HTMLElement {
     }, LAYOUT_DELAY_MS);
   }
 
-  async _layout() {
+  _layout() {
+    this._layoutPromise = this._runLayout();
+    return this._layoutPromise;
+  }
+
+  async _runLayout() {
     if (!this._board) return;
     const request = ++this._layoutRequest;
     const deviceId = this._board.device_id;
@@ -1347,6 +1354,14 @@ class VestaboardComposerPanel extends HTMLElement {
   // ---- Sending ----------------------------------------------------------
 
   async _send() {
+    if (!this._board) return;
+    // Send the latest Text mode edits, and don't let a layout land afterwards
+    if (this._layoutTimer) {
+      clearTimeout(this._layoutTimer);
+      this._layoutTimer = null;
+      this._layout();
+    }
+    await this._layoutPromise;
     if (!this._board) return;
     // Another board may be selected while this one is being sent to
     const { device_id: deviceId, name } = this._board;
