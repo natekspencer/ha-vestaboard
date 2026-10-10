@@ -28,6 +28,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult, section
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.schema_config_entry_flow import (
+    SchemaCommonFlowHandler,
     SchemaFlowFormStep,
     SchemaOptionsFlowHandler,
 )
@@ -51,6 +52,7 @@ from .const import (
     CONF_BOARD_MODEL,
     CONF_ENABLEMENT_TOKEN,
     CONF_ENTRY_TYPE,
+    CONF_HEART,
     CONF_IDENTIFY,
     CONF_JUSTIFY,
     CONF_LAYOUT,
@@ -117,7 +119,26 @@ OPTIONS_SCHEMA = vol.Schema(
 BOARD_OPTIONS_SCHEMA = OPTIONS_SCHEMA.extend(
     {vol.Optional(CONF_SHOW_FRAME, default=True): bool}
 )
-OPTIONS_FLOW = {"init": SchemaFlowFormStep(BOARD_OPTIONS_SCHEMA)}
+# Newer Flagships have a heart in place of the degree sign, as Notes always do
+FLAGSHIP_OPTIONS_SCHEMA = BOARD_OPTIONS_SCHEMA.extend(
+    {vol.Optional(CONF_HEART, default=False): bool}
+)
+
+
+async def _board_options_schema(handler: SchemaCommonFlowHandler) -> vol.Schema:
+    """Return the board options, with the heart option for Flagships only."""
+    entry = handler.parent_handler.config_entry
+    # Virtual boards store their model; physical boards report it once loaded
+    model = entry.data.get(CONF_BOARD_MODEL)
+    coordinator = getattr(entry, "runtime_data", None)
+    if model is None and coordinator is not None and coordinator.model is not None:
+        model = coordinator.model.model
+    if model == MODEL_FLAGSHIP:
+        return FLAGSHIP_OPTIONS_SCHEMA
+    return BOARD_OPTIONS_SCHEMA
+
+
+OPTIONS_FLOW = {"init": SchemaFlowFormStep(_board_options_schema)}
 # Arrays have no color of their own; each board in the array uses its own color
 ARRAY_OPTIONS_SCHEMA = vol.Schema(
     {key: value for key, value in OPTIONS_SCHEMA.schema.items() if key != CONF_MODEL}

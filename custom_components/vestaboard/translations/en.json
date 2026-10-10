@@ -86,7 +86,8 @@
       "init": {
         "data": {
           "model": "Select your Vestaboard color to change the image that is generated",
-          "show_frame": "Show frame"
+          "show_frame": "Show frame",
+          "heart": "Heart in place of degree sign"
         },
         "sections": {
           "strategy": {
@@ -105,7 +106,8 @@
           }
         },
         "data_description": {
-          "show_frame": "Draw the image with the Vestaboard's frame and logo. When off, only the bits are drawn, edge to edge. For arrays, this draws a separate frame around each Note."
+          "show_frame": "Draw the image with the Vestaboard's frame and logo. When off, only the bits are drawn, edge to edge. For arrays, this draws a separate frame around each Note.",
+          "heart": "Newer Vestaboard Flagships have a ❤️ on the bit that older ones show as °. Turn this on if yours does, so the image and message match your board."
         }
       }
     }
