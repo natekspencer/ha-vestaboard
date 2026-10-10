@@ -70,6 +70,8 @@ class VestaboardCoordinator(DataUpdateCoordinator):
     persistent_message: list[list[int]] | None = None
     temporary_message_expiration: datetime | None = None
     _cancel_cb: CALLBACK_TYPE | None = None
+    # A temporary message to show again when the current one expires
+    _restore_after: tuple[list[list[int]], datetime] | None = None
     # Called when the persistent message changes, e.g. to save it
     on_persistent_message: Callable[[list[list[int]]], None] | None = None
 
@@ -161,28 +163,19 @@ class VestaboardCoordinator(DataUpdateCoordinator):
         self,
         json: dict[str, list[list[int]] | str | int],
         expiration: datetime | None = None,
+        restore_after: tuple[list[list[int]], datetime] | None = None,
     ) -> None:
         """Write a persistent message, or a temporary one if expiration is set.
 
         A persistent message written while a temporary message is showing is
-        held until the temporary message expires.
+        held until the temporary message expires. A temporary message may pass
+        restore_after, a temporary message (characters and expiration) to show
+        again when it expires, if that hasn't expired by then.
         """
         async with self._temporary_message_lock:
             if expiration:
-                # Set before writing, so a refresh during the write doesn't take
-                # the temporary message as the persistent one; restore on failure
-                previous = self.temporary_message_expiration
-                self.temporary_message_expiration = expiration
-                try:
-                    await self.write_and_update_state(json)
-                except Exception:
-                    self.temporary_message_expiration = previous
-                    raise
-                if self._cancel_cb:
-                    self._cancel_cb()
-                self._cancel_cb = async_track_point_in_time(
-                    self.hass, self._handle_temporary_message_expiration, expiration
-                )
+                await self._async_write_temporary_message(json, expiration)
+                self._restore_after = restore_after
             else:
                 self._set_persistent_message(json["characters"])
                 current = self.temporary_message_expiration
@@ -203,12 +196,41 @@ class VestaboardCoordinator(DataUpdateCoordinator):
             if expiration and expiration > dt_util.now():
                 await self._async_revert_to_persistent_message()
 
+    async def _async_write_temporary_message(
+        self, json: dict[str, list[list[int]] | str | int], expiration: datetime
+    ) -> None:
+        """Write a temporary message and schedule its expiration.
+
+        Must be called with the temporary message lock held.
+        """
+        # Set before writing, so a refresh during the write doesn't take the
+        # temporary message as the persistent one; restore on failure
+        previous = self.temporary_message_expiration
+        self.temporary_message_expiration = expiration
+        try:
+            await self.write_and_update_state(json)
+        except Exception:
+            self.temporary_message_expiration = previous
+            raise
+        if self._cancel_cb:
+            self._cancel_cb()
+        self._cancel_cb = async_track_point_in_time(
+            self.hass, self._handle_temporary_message_expiration, expiration
+        )
+
     async def _handle_temporary_message_expiration(self, now: datetime) -> None:
         """Handle temporary message expiration."""
         async with self._temporary_message_lock:
             expiration = self.temporary_message_expiration
             if expiration and expiration > now:
                 # A newer temporary message replaced this one while waiting
+                return
+            if (restore := self._restore_after) and restore[1] > now:
+                characters, restore_expiration = restore
+                self._restore_after = None
+                await self._async_write_temporary_message(
+                    {"characters": characters}, restore_expiration
+                )
                 return
             _LOGGER.debug(
                 "Vestaboard temporary message expired @ %s, reverting to persistent message",
@@ -225,6 +247,7 @@ class VestaboardCoordinator(DataUpdateCoordinator):
             self._cancel_cb()
             self._cancel_cb = None
         self.temporary_message_expiration = None
+        self._restore_after = None
         if rows := self.persistent_message:
             await self.write_and_update_state(
                 {"characters": rows, **self.default_transition_settings}

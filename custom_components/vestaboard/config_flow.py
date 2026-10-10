@@ -288,8 +288,9 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
         """Restore any Notes showing their name once the flow ends, however it ends.
 
         A Note goes back to the temporary message it was showing before, if that
-        hasn't expired, or else to its persistent message. A Note that was sent
-        a newer temporary message during the flow is left alone.
+        hasn't expired, or else to its persistent message. A Note whose name
+        already expired restored itself; one that was sent a newer temporary
+        message during the flow is left alone.
         """
         for entry_id, previous in (self.identified_boards or {}).items():
             entry = self.hass.config_entries.async_get_entry(entry_id)
@@ -553,8 +554,10 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
                     _async_board_label(self.hass, entry_id).upper(),
                     {CONF_JUSTIFY: ALIGN_CENTER, CONF_ALIGN: ALIGN_CENTER},
                 )
+                # If the name expires before the flow ends, the Note goes back
+                # to its earlier temporary message by itself
                 await coordinator.async_write_message(
-                    {"characters": characters}, expiration
+                    {"characters": characters}, expiration, restore_after=previous
                 )
             except Exception:  # pylint: disable=broad-except
                 # A Note that can't show its name is still offered, just unlabeled
