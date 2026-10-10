@@ -486,6 +486,10 @@ class VestaboardComposerPanel extends HTMLElement {
     this._lastAction = null;
     this._textPushed = false;
     this._textGrid = null;
+    // Drop a layout of the previous board's message, waiting or in flight
+    clearTimeout(this._layoutTimer);
+    this._layoutTimer = null;
+    this._layoutRequest += 1;
 
     const draft = readDraft(deviceId);
     if (draft && sameSize(draft.grid, board.rows, board.columns)) {
@@ -960,6 +964,12 @@ class VestaboardComposerPanel extends HTMLElement {
   // ---- Modes and tools --------------------------------------------------
 
   _setMode(mode) {
+    if (mode !== "text" && this._layoutTimer) {
+      // Lay out the latest edits now, so they're on the board in Visual mode
+      clearTimeout(this._layoutTimer);
+      this._layoutTimer = null;
+      this._layout();
+    }
     this._mode = mode;
     this.shadowRoot
       .querySelectorAll(".modes button")
@@ -1285,7 +1295,10 @@ class VestaboardComposerPanel extends HTMLElement {
   _scheduleLayout() {
     this._saveDraft();
     clearTimeout(this._layoutTimer);
-    this._layoutTimer = setTimeout(() => this._layout(), LAYOUT_DELAY_MS);
+    this._layoutTimer = setTimeout(() => {
+      this._layoutTimer = null;
+      this._layout();
+    }, LAYOUT_DELAY_MS);
   }
 
   async _layout() {
