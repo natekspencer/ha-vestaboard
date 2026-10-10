@@ -89,11 +89,10 @@ STEP_VIRTUAL_SCHEMA = vol.Schema(
         ),
     }
 )
+COLOR_SCHEMA = vol.In({COLOR_BLACK: "Black", COLOR_WHITE: "White"})
 OPTIONS_SCHEMA = vol.Schema(
     {
-        vol.Required(CONF_MODEL, default=COLOR_BLACK): vol.In(
-            {COLOR_BLACK: "Black", COLOR_WHITE: "White"}
-        ),
+        vol.Required(CONF_MODEL, default=COLOR_BLACK): COLOR_SCHEMA,
         vol.Optional(CONF_STRATEGY): section(
             vol.Schema(
                 {
@@ -133,7 +132,8 @@ async def _board_options_schema(handler: SchemaCommonFlowHandler) -> vol.Schema:
     coordinator = getattr(entry, "runtime_data", None)
     if model is None and coordinator is not None and coordinator.model is not None:
         model = coordinator.model.model
-    if model == MODEL_FLAGSHIP:
+    # Only Flagships are asked about the heart during setup
+    if model == MODEL_FLAGSHIP or CONF_HEART in entry.options:
         return FLAGSHIP_OPTIONS_SCHEMA
     return BOARD_OPTIONS_SCHEMA
 
@@ -290,6 +290,10 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
     api_key: str | None = None
     name: str | None = None
 
+    # Board setup state, kept until the appearance step creates the entry
+    board_model: str | None = None
+    entry_data: dict[str, Any] | None = None
+
     # Array setup state
     array_rows: int = 0
     array_columns: int = 0
@@ -397,15 +401,42 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Handle setting up a virtual Vestaboard, which has no hardware behind it."""
         if user_input is not None:
-            return self.async_create_entry(
-                title=user_input[CONF_NAME],
-                data={
-                    CONF_ENTRY_TYPE: ENTRY_TYPE_VIRTUAL,
-                    CONF_BOARD_MODEL: user_input[CONF_BOARD_MODEL],
-                },
-            )
+            self.name = user_input[CONF_NAME]
+            self.board_model = user_input[CONF_BOARD_MODEL]
+            self.entry_data = {
+                CONF_ENTRY_TYPE: ENTRY_TYPE_VIRTUAL,
+                CONF_BOARD_MODEL: self.board_model,
+            }
+            return await self.async_step_appearance()
 
         return self.async_show_form(step_id="virtual", data_schema=STEP_VIRTUAL_SCHEMA)
+
+    async def async_step_appearance(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Choose the board's color, and for Flagships whether it has the heart.
+
+        These are saved as options, so they can be changed later.
+        """
+        if user_input is not None:
+            return self.async_create_entry(
+                title=self.name or "Vestaboard",
+                data=self.entry_data,
+                options=user_input,
+            )
+
+        schema = vol.Schema(
+            {vol.Required(CONF_MODEL, default=COLOR_BLACK): COLOR_SCHEMA}
+        )
+        if self.board_model == MODEL_FLAGSHIP:
+            schema = schema.extend({vol.Required(CONF_HEART, default=False): bool})
+        return self.async_show_form(
+            step_id="appearance",
+            data_schema=schema,
+            description_placeholders={
+                "model": f"Vestaboard {(self.board_model or '').capitalize()}".strip()
+            },
+        )
 
     async def async_step_array(
         self, user_input: dict[str, Any] | None = None
@@ -665,10 +696,8 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
                 await self.hass.config_entries.async_reload(existing_entry.entry_id)
                 return self.async_abort(reason="reauth_successful")
 
-            return self.async_create_entry(
-                title=self.name or "Vestaboard",
-                data=data,
-            )
+            self.entry_data = data
+            return await self.async_step_appearance()
 
         schema = self.add_suggested_values_to_schema(
             schema, {CONF_API_KEY: self.api_key}
@@ -689,6 +718,7 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
             elif status == EndpointStatus.VALID:
                 if write_connected_message:
                     model = VestaboardModel.from_color(COLOR_BLACK, client.data)
+                    self.board_model = model.model
                     message = (
                         VESTABOARD_CONNECTED_MESSAGE
                         if model.is_flagship
