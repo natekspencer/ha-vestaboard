@@ -8,6 +8,18 @@ const HEART_CODE = 62;
 const BLANK_CODE = 0;
 const COLOR_CODES = [63, 64, 65, 66, 67, 68, 69, 70, 71];
 const PALETTE = [63, 64, 65, 66, 67, 68, 69, 70, HEART_CODE];
+// What each palette entry inserts into a text message. White and black swap on
+// white boards, so they use their codes rather than ⬜ and ⬛.
+const TEXT_TOKENS = {
+  63: "🟥",
+  64: "🟧",
+  65: "🟨",
+  66: "🟩",
+  67: "🟦",
+  68: "🟪",
+  69: "{69}",
+  70: "{70}",
+};
 const COLOR_NAMES = {
   "#DA291C": "Red",
   "#FA7400": "Orange",
@@ -543,6 +555,10 @@ class VestaboardComposerPanel extends HTMLElement {
             </div>
 
             <div class="text-tools hidden">
+              <div class="row" style="margin-bottom: 8px">
+                <div class="palette text-palette"></div>
+                <span class="hint">Click a color or symbol to insert it at the cursor.</span>
+              </div>
               <textarea class="message" placeholder="Type a message and it's laid out across the board"></textarea>
               <div class="row" style="margin-top: 8px">
                 <label class="field">Justify<select class="justify"></select></label>
@@ -581,7 +597,8 @@ class VestaboardComposerPanel extends HTMLElement {
     this._stage = root.querySelector(".stage");
     this._boardsEl = root.querySelector(".boards");
     this._keys = root.querySelector(".keys");
-    this._palette = root.querySelector(".palette");
+    this._palette = root.querySelector(".visual-tools .palette");
+    this._textPalette = root.querySelector(".text-palette");
     this._toolHint = root.querySelector(".tool-hint");
     this._messageInput = root.querySelector(".message");
     this._justifySelect = root.querySelector(".justify");
@@ -692,30 +709,39 @@ class VestaboardComposerPanel extends HTMLElement {
 
   _renderPalette() {
     if (!this._board) return;
-    const theme = this._themeAt(0, 0);
-    this._palette.replaceChildren(
-      ...PALETTE.map((code) => {
-        const swatch = document.createElement("div");
-        swatch.className = "swatch";
-        swatch.dataset.code = code;
-        swatch.style.background = theme.bit;
-        if (code === HEART_CODE) {
-          const heart = this._board.heart;
-          swatch.appendChild(heart ? this._heartElement() : document.createTextNode("°"));
-          swatch.style.color = theme.text;
-          swatch.title = heart ? "Heart" : "Degree sign";
-        } else {
-          const chip = document.createElement("div");
-          chip.className = "chip";
-          chip.style.background = theme.colors[code];
-          swatch.appendChild(chip);
-          swatch.title = COLOR_NAMES[theme.colors[code].toUpperCase()] || `Color ${code}`;
-        }
-        swatch.addEventListener("click", () => this._onPalette(code));
+    this._palette.replaceChildren(...this._swatches((code) => this._onPalette(code)));
+    this._textPalette.replaceChildren(
+      ...this._swatches((code) => this._insertIntoMessage(code)).map((swatch) => {
+        // Keep the message box focused, so its cursor stays where it was
+        swatch.addEventListener("mousedown", (ev) => ev.preventDefault());
         return swatch;
       })
     );
     this._renderPaletteSelection();
+  }
+
+  _swatches(onClick) {
+    const theme = this._themeAt(0, 0);
+    return PALETTE.map((code) => {
+      const swatch = document.createElement("div");
+      swatch.className = "swatch";
+      swatch.dataset.code = code;
+      swatch.style.background = theme.bit;
+      if (code === HEART_CODE) {
+        const heart = this._board.heart;
+        swatch.appendChild(heart ? this._heartElement() : document.createTextNode("°"));
+        swatch.style.color = theme.text;
+        swatch.title = heart ? "Heart" : "Degree sign";
+      } else {
+        const chip = document.createElement("div");
+        chip.className = "chip";
+        chip.style.background = theme.colors[code];
+        swatch.appendChild(chip);
+        swatch.title = COLOR_NAMES[theme.colors[code].toUpperCase()] || `Color ${code}`;
+      }
+      swatch.addEventListener("click", () => onClick(code));
+      return swatch;
+    });
   }
 
   _renderPaletteSelection() {
@@ -1154,6 +1180,18 @@ class VestaboardComposerPanel extends HTMLElement {
   }
 
   // ---- Text mode --------------------------------------------------------
+
+  _insertIntoMessage(code) {
+    const token =
+      code === HEART_CODE ? (this._board.heart ? "❤️" : "°") : TEXT_TOKENS[code];
+    const input = this._messageInput;
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? start;
+    input.setRangeText(token, start, end, "end");
+    input.focus();
+    this._text = input.value;
+    this._scheduleLayout();
+  }
 
   _scheduleLayout() {
     this._saveDraft();
