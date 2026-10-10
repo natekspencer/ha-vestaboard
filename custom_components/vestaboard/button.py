@@ -5,7 +5,6 @@ from __future__ import annotations
 from homeassistant.components.button import ButtonEntity, ButtonEntityDescription
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.util.dt import now as dt_now
 
 from .entity import VestaboardConfigEntry, VestaboardEntity
 
@@ -28,6 +27,4 @@ class VestaboardButtonEntity(VestaboardEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Press the button."""
-        expiration = self.coordinator.temporary_message_expiration
-        if expiration and expiration > (now := dt_now()):
-            await self.coordinator._handle_temporary_message_expiration(now)
+        await self.coordinator.async_clear_temporary_message()

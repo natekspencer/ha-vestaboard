@@ -2,15 +2,25 @@
 
 from __future__ import annotations
 
+from typing import Any
+
+from homeassistant.core import callback
 from homeassistant.helpers.device_registry import CONNECTION_NETWORK_MAC, format_mac
 from homeassistant.helpers.entity import DeviceInfo, EntityDescription
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
-from .coordinator import VestaboardConfigEntry, VestaboardCoordinator
+from .const import DOMAIN, ENTRY_TYPE_DEVICE, ENTRY_TYPE_VIRTUAL
+from .coordinator import (
+    VestaboardArrayCoordinator,
+    VestaboardConfigEntry,
+    VestaboardCoordinator,
+)
+from .helpers import get_entry_type
 
 
-class VestaboardEntity(CoordinatorEntity[VestaboardCoordinator]):
+class VestaboardEntity(
+    CoordinatorEntity[VestaboardCoordinator | VestaboardArrayCoordinator]
+):
     """Base class for Vestaboard entities."""
 
     _attr_has_entity_name = True
@@ -26,14 +36,29 @@ class VestaboardEntity(CoordinatorEntity[VestaboardCoordinator]):
         self.entity_description = description
         self._attr_unique_id = f"{entry.entry_id}-{description.key}"
 
+        entry_type = get_entry_type(entry)
+        model = coordinator.model.name if coordinator.model else "Vestaboard"
+        if entry_type == ENTRY_TYPE_VIRTUAL:
+            model = f"Virtual {model}"
         device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
             name=entry.title,
             manufacturer="Vestaboard",
-            model=coordinator.model.name if coordinator.model else "Vestaboard",
-            sw_version=coordinator.vestaboard.firmware_version,
+            model=model,
+            sw_version=coordinator.firmware_version,
         )
-        if entry.unique_id:
+        if entry.unique_id and entry_type == ENTRY_TYPE_DEVICE:
             mac = format_mac(entry.unique_id)
             device_info["connections"] = {(CONNECTION_NETWORK_MAC, mac)}
         self._attr_device_info = device_info
+
+    @callback
+    def _async_update_options(self, changes: dict[str, Any]) -> None:
+        """Update config entry options, e.g. from a configuration entity.
+
+        Quiet hours changes are applied without reloading the entry.
+        """
+        entry = self.coordinator.config_entry
+        self.hass.config_entries.async_update_entry(
+            entry, options={**entry.options, **changes}
+        )

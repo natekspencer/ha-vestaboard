@@ -9,7 +9,6 @@ import voluptuous as vol
 from homeassistant.const import CONF_DEVICE_ID
 from homeassistant.core import HomeAssistant, HomeAssistantError, ServiceCall, callback
 from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers.event import async_track_point_in_time
 from homeassistant.util.dt import now as dt_now
 
 from .const import (
@@ -49,16 +48,17 @@ _random_colors = vol.Schema(
     {vol.Optional("colors"): [vol.All(int, vol.Range(min=63, max=71))]}
 )
 _raw_characters = vol.All(cv.ensure_list, [vol.All(cv.ensure_list, [_character_codes])])
+# Upper bounds depend on the target board or array size; see _validate_component_sizes
 _style = vol.Schema(
     {
-        vol.Optional("height"): vol.All(vol.Coerce(int), vol.Range(min=1, max=6)),
-        vol.Optional("width"): vol.All(vol.Coerce(int), vol.Range(min=1, max=22)),
+        vol.Optional("height"): vol.All(vol.Coerce(int), vol.Range(min=1)),
+        vol.Optional("width"): vol.All(vol.Coerce(int), vol.Range(min=1)),
         vol.Optional(CONF_JUSTIFY): vol.In(ALIGN_HORIZONTAL),
         vol.Optional(CONF_ALIGN): vol.In(ALIGN_VERTICAL),
         vol.Optional("absolutePosition"): vol.Schema(
             {
-                vol.Required("x"): vol.All(vol.Coerce(int), vol.Range(min=0, max=21)),
-                vol.Required("y"): vol.All(vol.Coerce(int), vol.Range(min=0, max=5)),
+                vol.Required("x"): vol.All(vol.Coerce(int), vol.Range(min=0)),
+                vol.Required("y"): vol.All(vol.Coerce(int), vol.Range(min=0)),
             }
         ),
     }
@@ -75,6 +75,27 @@ _component = vol.All(
     ),
     cv.has_at_least_one_key("template", "rawCharacters", "calendar", "randomColors"),
 )
+
+
+def _validate_component_sizes(vbml: dict, rows: int, columns: int) -> None:
+    """Reject components larger than the target, or positioned off it.
+
+    A component that starts on the target but extends past its edge is
+    clipped when parsed, as before.
+    """
+    for component in vbml.get("components", []):
+        style = component.get("style") or {}
+        if style.get("width", 0) > columns or style.get("height", 0) > rows:
+            raise HomeAssistantError(
+                f"Invalid VBML payload: component is larger than {rows}x{columns}"
+            )
+        if (position := style.get("absolutePosition")) and (
+            position["x"] >= columns or position["y"] >= rows
+        ):
+            raise HomeAssistantError(
+                f"Invalid VBML payload: component is positioned outside {rows}x{columns}"
+            )
+
 
 VBML_SCHEMA = vol.Schema(
     {
@@ -142,6 +163,9 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 await coordinator.async_request_refresh()
             if coordinator.model is None:
                 raise HomeAssistantError("Vestaboard model is not initialized")
+            _validate_component_sizes(
+                vbml, coordinator.model.rows, coordinator.model.columns
+            )
             try:
                 rows = coordinator.model.parse_vbml(vbml)
             except Exception as ex:
@@ -151,20 +175,10 @@ def async_setup_services(hass: HomeAssistant) -> None:
             if CONF_STRATEGY not in json:
                 json.update(coordinator.default_transition_settings)
 
+            expiration = None
             if duration := call.data.get(CONF_DURATION):  # This is a temporary message
-                if coordinator._cancel_cb:
-                    coordinator._cancel_cb()
                 expiration = dt_now() + timedelta(seconds=duration)
-                coordinator.temporary_message_expiration = expiration
-                await coordinator.write_and_update_state(json)
-                coordinator._cancel_cb = async_track_point_in_time(
-                    hass, coordinator._handle_temporary_message_expiration, expiration
-                )
-            else:
-                coordinator.persistent_message = rows
-                expiration = coordinator.temporary_message_expiration
-                if not (expiration and expiration > dt_now()):
-                    await coordinator.write_and_update_state(json)
+            await coordinator.async_write_message(json, expiration)
 
     hass.services.async_register(
         DOMAIN,

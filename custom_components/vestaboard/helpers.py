@@ -10,29 +10,48 @@ from typing import TYPE_CHECKING, Any, cast
 from PIL import Image, ImageDraw, ImageOps
 from pyvbml.character_codes import COLOR_CODES, CharacterCode
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .client import DEFAULT_PORT, VestaboardLocalClient
-from .const import COLOR_BLACK, CONF_ENABLEMENT_TOKEN, DOMAIN
+from .const import (
+    COLOR_BLACK,
+    CONF_ENABLEMENT_TOKEN,
+    CONF_ENTRY_TYPE,
+    DOMAIN,
+    ENTRY_TYPE_ARRAY,
+    ENTRY_TYPE_DEVICE,
+)
 from .fontloader import get_font_bytes, load_emoji_font, load_font
 from .vestaboard_model import (
     BIT_HEIGHT,
     BIT_HEIGHT_SPACING,
     BIT_WIDTH,
     BIT_WIDTH_SPACING,
+    VestaboardArrayModel,
     VestaboardModel,
 )
 
 if TYPE_CHECKING:
-    from .coordinator import VestaboardCoordinator
+    from .coordinator import VestaboardArrayCoordinator, VestaboardCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
 PRINTABLE = (
     " ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890!@#$() - +&=;: '\"%,.  /? °🟥🟧🟨🟩🟦🟪⬜⬛■"
 )
+
+
+def get_entry_type(entry: ConfigEntry) -> str:
+    """Return the config entry type: a physical device, a virtual board or an array."""
+    return entry.data.get(CONF_ENTRY_TYPE, ENTRY_TYPE_DEVICE)
+
+
+def is_array_entry(entry: ConfigEntry) -> bool:
+    """Return True if the config entry is a Vestaboard array."""
+    return get_entry_type(entry) == ENTRY_TYPE_ARRAY
 
 
 async def create_client(
@@ -80,8 +99,67 @@ def create_png(
     color: str = COLOR_BLACK,
     height: int = 1080,
     draw_bit: bool = True,
+    model: VestaboardModel | VestaboardArrayModel | None = None,
 ) -> bytes:
-    model = VestaboardModel.from_color(color, data)
+    """Create a png of the message on a Vestaboard.
+
+    Pass an array model to render a whole array as one frameless board.
+    """
+    return _to_png(render_board(data, color, height, draw_bit, model))
+
+
+def create_framed_array_png(
+    tiles: list[list[list[list[int]]]],
+    colors: tuple[tuple[str, ...], ...],
+    height: int = 1080,
+    draw_bit: bool = True,
+) -> bytes:
+    """Create a png of the message on a grid of separately framed Vestaboards."""
+    grid_rows = len(tiles)
+    tile_height = height // grid_rows
+    images = [
+        [
+            render_board(tile, color, tile_height, draw_bit)
+            for tile, color in zip(tile_row, color_row)
+        ]
+        for tile_row, color_row in zip(tiles, colors)
+    ]
+    tile_width = images[0][0].width
+    gap = max(1, tile_height // 100)
+
+    img = Image.new(
+        "RGBA",
+        (
+            tile_width * len(images[0]) + gap * (len(images[0]) - 1),
+            tile_height * grid_rows + gap * (grid_rows - 1),
+        ),
+    )
+    for grid_row, tile_row in enumerate(images):
+        for grid_column, tile_img in enumerate(tile_row):
+            img.paste(
+                tile_img,
+                (grid_column * (tile_width + gap), grid_row * (tile_height + gap)),
+            )
+    return _to_png(img)
+
+
+def _to_png(img: Image.Image) -> bytes:
+    """Encode an image as png."""
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def render_board(
+    data: list[list[int]],
+    color: str = COLOR_BLACK,
+    height: int = 1080,
+    draw_bit: bool = True,
+    model: VestaboardModel | VestaboardArrayModel | None = None,
+) -> Image.Image:
+    """Render the message on a Vestaboard as an image."""
+    if model is None:
+        model = VestaboardModel.from_color(color, data)
 
     #  Physical scale
     px_per_in = height / model.height
@@ -94,11 +172,12 @@ def create_png(
 
     # Board background
     outer_border = model.frame_thickness * px_per_in
-    draw.rectangle(
-        [(0, 0), (width, height)],
-        outline=model.bit_color,
-        width=int(outer_border),
-    )
+    if outer_border:
+        draw.rectangle(
+            [(0, 0), (width, height)],
+            outline=model.bit_color,
+            width=int(outer_border),
+        )
 
     inner_border = model.frame_border * px_per_in
 
@@ -122,20 +201,31 @@ def create_png(
     _, top, _, bottom = text_bbox
     glyph_height = bottom - top
 
+    if isinstance(model, VestaboardArrayModel):
+        _fill_array_backgrounds(
+            draw,
+            model,
+            (width, height),
+            (start_x, start_y),
+            (bit_w, bit_h),
+            (gap_x, gap_y),
+        )
+
     # Draw bits
     for row, characters in enumerate(data):
         ypos = start_y + row * (bit_h + gap_y)
         for col, code in enumerate(characters):
             xpos = start_x + col * (bit_w + gap_x)
+            board = model.board_at(row, col)
 
             if draw_bit:
                 draw.rectangle(
                     [(xpos, ypos), (xpos + bit_w, ypos + bit_h)],
-                    fill=model.bit_color,
+                    fill=board.bit_color,
                 )
 
-            if code in model.emoji_map:
-                emoji = model.emoji_for_code(code)
+            if code in board.emoji_map:
+                emoji = board.emoji_for_code(code)
                 emoji_img = draw_emoji(emoji, (int(bit_w), int(bit_h)))
                 vertical_padding = (font_height - glyph_height) / 2
                 img.paste(
@@ -155,7 +245,7 @@ def create_png(
                             ypos + vertical_padding + top + glyph_height,
                         ),
                     ],
-                    fill=model.color_map[code],
+                    fill=board.color_map[code],
                 )
 
                 flap_top = ypos + bit_h * 0.1
@@ -168,7 +258,7 @@ def create_png(
                         (xpos, stripe_center - stripe_h / 2),
                         (xpos + bit_w, stripe_center + stripe_h / 2),
                     ],
-                    fill=model.frame_color,
+                    fill=board.frame_color,
                 )
 
             else:
@@ -176,12 +266,64 @@ def create_png(
                 draw.text(
                     (xpos + bit_w / 2, ypos + bit_h / 2),
                     char,
-                    fill=model.text_color,
+                    fill=board.text_color,
                     font=font,
                     anchor="mm",
                 )
 
-    # logo placement
+    if model.has_frame:
+        _draw_logo(draw, model, start_y, bit_h, gap_y, inner_border, width)
+
+    return img
+
+
+def _fill_array_backgrounds(
+    draw: ImageDraw.ImageDraw,
+    model: VestaboardArrayModel,
+    size: tuple[int, int],
+    start: tuple[float, float],
+    bit: tuple[float, float],
+    gap: tuple[float, float],
+) -> None:
+    """Fill the area behind each board of an array with that board's color.
+
+    Each board's area runs to the midpoint of the gap between it and its
+    neighbors, and to the image edge on the outside of the array.
+    """
+    width, height = size
+    start_x, start_y = start
+    gap_x, gap_y = gap
+    pitch_x, pitch_y = bit[0] + gap_x, bit[1] + gap_y
+    board_rows, board_columns = model.board.rows, model.board.columns
+    for grid_row in range(model.grid_rows):
+        top = start_y + grid_row * board_rows * pitch_y - gap_y / 2
+        bottom = top + board_rows * pitch_y
+        for grid_column in range(model.grid_columns):
+            left = start_x + grid_column * board_columns * pitch_x - gap_x / 2
+            right = left + board_columns * pitch_x
+            board = model.board_at(grid_row * board_rows, grid_column * board_columns)
+            draw.rectangle(
+                [
+                    (0 if grid_column == 0 else left, 0 if grid_row == 0 else top),
+                    (
+                        width if grid_column == model.grid_columns - 1 else right,
+                        height if grid_row == model.grid_rows - 1 else bottom,
+                    ),
+                ],
+                fill=board.frame_color,
+            )
+
+
+def _draw_logo(
+    draw: ImageDraw.ImageDraw,
+    model: VestaboardModel,
+    start_y: float,
+    bit_h: float,
+    gap_y: float,
+    inner_border: float,
+    width: int,
+) -> None:
+    """Draw the logo centered in the frame below the bits."""
     logo_text = "VESTABOARD"
     logo_font = load_font(int(bit_h * 0.3))
 
@@ -204,10 +346,6 @@ def create_png(
         anchor="md",
         font=logo_font,
     )
-
-    buffer = io.BytesIO()
-    img.save(buffer, format="PNG")
-    return buffer.getvalue()
 
 
 def create_svg(data: list[list[int]], color: str = COLOR_BLACK) -> str:
@@ -266,8 +404,8 @@ def symbol(code: int) -> str:
 @callback
 def async_get_coordinator_by_device_id(
     hass: HomeAssistant, device_id: str
-) -> VestaboardCoordinator:
-    """Get the Vestaboard coordinator for this device ID."""
+) -> VestaboardCoordinator | VestaboardArrayCoordinator:
+    """Get the Vestaboard (or Vestaboard array) coordinator for this device ID."""
     device_registry = dr.async_get(hass)
 
     if (device_entry := device_registry.async_get(device_id)) is None:
