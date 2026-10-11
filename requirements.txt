@@ -6,6 +6,8 @@ pyvbml==0.3.1
 
 # Development
 colorlog
+isal
 pip>=26.2.1
 pre-commit
 ruff>=0.17.0
+zlib-ng
