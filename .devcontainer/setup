@@ -7,6 +7,9 @@ sudo apt-get install libturbojpeg0 libpcap0.8t64 ffmpeg -y
 
 cd "$(dirname "$0")/.."
 
+# pip installs tools like pre-commit to ~/.local/bin, which may not be on PATH yet
+export PATH="$HOME/.local/bin:$PATH"
+
 python3 -m pip install --requirement requirements.txt --upgrade
 
 # Install the go2rtc binary required by default_config, matching Home Assistant's recommended version
