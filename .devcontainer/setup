@@ -3,7 +3,7 @@
 set -e
 
 sudo apt-get update
-sudo apt-get install libturbojpeg0 libpcap0.8t64 ffmpeg -y
+sudo apt-get install libpcap0.8t64 ffmpeg -y
 
 cd "$(dirname "$0")/.."
 
