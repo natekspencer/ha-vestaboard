@@ -1,6 +1,5 @@
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://brands.home-assistant.io/vestaboard/dark_logo.png">
-  <img alt="Vestaboard logo" src="https://brands.home-assistant.io/vestaboard/logo.png" width="450px">
+  <img alt="Vestaboard logo" src="custom_components/vestaboard/brand/logo.png" width="450px">
 </picture>
 
 # Vestaboard for Home Assistant
