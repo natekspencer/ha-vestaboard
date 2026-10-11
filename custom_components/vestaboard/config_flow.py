@@ -373,12 +373,7 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
                     )
             except asyncio.CancelledError:
                 raise
-            except (
-                ClientConnectorError,
-                asyncio.TimeoutError,
-                OSError,
-                ValueError,
-            ) as ex:
+            except (TimeoutError, ClientConnectorError, OSError, ValueError) as ex:
                 _LOGGER.debug(
                     "Failed to probe entry %s at %s during DHCP discovery: %s",
                     entry.entry_id,
@@ -741,7 +736,7 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
                 self.api_key = client.api_key
             else:
                 errors["base"] = "unknown"
-        except asyncio.TimeoutError:
+        except TimeoutError:
             errors["base"] = "timeout_connect"
         except ClientConnectorError:
             errors["base"] = "invalid_host"
