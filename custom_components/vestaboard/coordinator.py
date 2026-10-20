@@ -8,6 +8,8 @@ from datetime import datetime, time, timedelta
 import logging
 from typing import Any
 
+from aiohttp import ClientError
+
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
@@ -37,6 +39,10 @@ _LOGGER = logging.getLogger(__name__)
 type VestaboardConfigEntry = ConfigEntry[
     VestaboardCoordinator | VestaboardArrayCoordinator
 ]
+
+# How long a board can go unread before its entities become unavailable.
+# Network or Wi-Fi hiccups can fail the odd read, so a few failed polls keep the last state.
+READ_FAILURE_GRACE = timedelta(minutes=1)
 
 # Coalesce member board updates (e.g. after writing to every board) into one refresh
 ARRAY_REFRESH_COOLDOWN = 0.5
@@ -122,7 +128,8 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
     # Called when the persistent message changes, e.g. to save it
     on_persistent_message: Callable[[list[list[int]]], None] | None = None
 
-    _read_errors: int = 0
+    # When reads started failing, if the last read failed
+    _read_failing_since: datetime | None = None
 
     def __init__(
         self,
@@ -183,17 +190,41 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
                 data = await self.vestaboard.read_message()
         except InvalidApiKeyError as err:
             raise ConfigEntryAuthFailed from err
-        except Exception as ex:
-            raise UpdateFailed(
-                f"Couldn't read vestaboard at {self.vestaboard.base_url}"
-            ) from ex
+        except (ClientError, TimeoutError) as ex:
+            return self._handle_read_failure(ex)
         if data is None:
             raise ConfigEntryAuthFailed
+        if self._read_failing_since is not None:
+            _LOGGER.debug("Reading %s recovered", self.vestaboard.base_url)
+            self._read_failing_since = None
 
         if self.temporary_message_expiration is None:
             self._set_persistent_message(data)
 
         return await self.hass.async_add_executor_job(self.process_data, data)
+
+    def _handle_read_failure(self, ex: Exception) -> list[list[int]]:
+        """Keep the last state through a short run of failed reads.
+
+        Raises UpdateFailed, making entities unavailable, once reads have
+        failed for longer than READ_FAILURE_GRACE, or if there's no state yet.
+        """
+        now = dt_util.utcnow()
+        if self._read_failing_since is None:
+            self._read_failing_since = now
+        if (
+            self.data is not None
+            and now - self._read_failing_since < READ_FAILURE_GRACE
+        ):
+            _LOGGER.debug(
+                "Couldn't read vestaboard at %s, keeping the last state: %r",
+                self.vestaboard.base_url,
+                ex,
+            )
+            return self.data
+        raise UpdateFailed(
+            f"Couldn't read vestaboard at {self.vestaboard.base_url}"
+        ) from ex
 
     async def write_and_update_state(
         self, json: dict[str, list[list[int]] | str | int]
