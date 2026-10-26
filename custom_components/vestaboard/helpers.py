@@ -459,10 +459,12 @@ def async_get_coordinator_by_device_id(
     if (device_entry := device_registry.async_get(device_id)) is None:
         raise ValueError(f"Unknown Vestaboard device ID: {device_id}")
 
-    for entry_id in device_entry.config_entries:
+    for domain, entry_id in device_entry.identifiers:
         if (
-            entry := hass.config_entries.async_get_entry(entry_id)
-        ) and entry.domain == DOMAIN:
+            domain == DOMAIN
+            and (entry := hass.config_entries.async_get_entry(entry_id))
+            and entry.domain == DOMAIN
+        ):
             return entry.runtime_data
 
     raise ValueError(f"No coordinator for device ID: {device_id}")
