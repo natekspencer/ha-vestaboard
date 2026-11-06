@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 from custom_components.vestaboard.const import DOMAIN, SERVICE_MESSAGE
 from homeassistant.config_entries import ConfigEntryState
-from homeassistant.const import CONF_DEVICE_ID
+from homeassistant.const import CONF_DEVICE_ID, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 
@@ -31,10 +32,30 @@ async def test_setup_and_unload(
 
     entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
     assert {entity.domain for entity in entities} == PLATFORM_DOMAINS
+    for entity in entities:
+        if not entity.disabled:
+            assert hass.states.get(entity.entity_id).state != STATE_UNAVAILABLE
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
     assert entry.state is ConfigEntryState.NOT_LOADED
+
+
+async def test_panel_registered(
+    hass: HomeAssistant, init_integration: MockConfigEntry, mock_panel: AsyncMock
+) -> None:
+    """Test the composer panel loads the files served by the integration."""
+    hass.http.async_register_static_paths.assert_awaited_once()
+    script, font = hass.http.async_register_static_paths.await_args.args[0]
+    assert script.url_path == "/vestaboard_static/vestaboard-composer.js"
+    assert font.url_path == "/vestaboard_static/Vestaboard.otf"
+    assert Path(script.path).is_file()
+    assert Path(font.path).is_file()
+
+    panel = mock_panel.await_args.kwargs
+    assert panel["frontend_url_path"] == "vestaboard"
+    assert panel["module_url"].startswith(f"{script.url_path}?v=")
+    assert panel["config"] == {"font_url": font.url_path}
 
 
 async def test_device_registered(
