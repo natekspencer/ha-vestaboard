@@ -135,8 +135,8 @@ async def websocket_boards(
     for entry in hass.config_entries.async_entries(DOMAIN):
         if entry.state is not ConfigEntryState.LOADED:
             continue
-        device = device_registry.async_get_device(
-            identifiers={(DOMAIN, entry.entry_id)}
+        device = device_registry.async_get_device_by_identifier(
+            (DOMAIN, entry.entry_id), entry.entry_id
         )
         if device is None or (info := _board_info(entry, device.id, logos)) is None:
             continue
