@@ -1,0 +1,7 @@
+# Integration
+pyvbml==0.3.1
+
+# Home Assistant's dhcp component, imported by the config flow
+aiodhcpwatcher
+aiodiscover
+cached-ipaddress
