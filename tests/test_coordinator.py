@@ -30,9 +30,7 @@ def _refused() -> ClientConnectorError:
 @pytest.fixture(autouse=True)
 def no_retry_delay() -> Generator[None]:
     """Retry writes without waiting."""
-    with patch(
-        "custom_components.vestaboard.coordinator.WRITE_RETRY_DELAYS", (0, 0, 0)
-    ):
+    with patch("custom_components.vestaboard.coordinator.WRITE_RETRY_DELAYS", (0,)):
         yield
 
 
@@ -55,15 +53,15 @@ async def test_write_retried_after_refused_connection(
     with patch.object(
         coordinator.vestaboard,
         "write_message",
-        AsyncMock(side_effect=[_refused(), _refused(), True]),
+        AsyncMock(side_effect=[_refused(), True]),
     ) as mock_write:
         await _send(hass, init_integration)
 
-    assert mock_write.await_count == 3
+    assert mock_write.await_count == 2
     assert "HELLO" in coordinator.message
 
 
-async def test_write_gives_up_after_retries(
+async def test_write_gives_up_after_one_retry(
     hass: HomeAssistant, init_integration: MockConfigEntry
 ) -> None:
     """Test a board that keeps refusing raises a clear error."""
@@ -78,7 +76,7 @@ async def test_write_gives_up_after_retries(
     ):
         await _send(hass, init_integration)
 
-    assert mock_write.await_count == 4
+    assert mock_write.await_count == 2
 
 
 async def test_write_not_retried_once_sent(

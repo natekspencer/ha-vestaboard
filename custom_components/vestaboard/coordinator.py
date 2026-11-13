@@ -45,8 +45,8 @@ type VestaboardConfigEntry = ConfigEntry[
 READ_FAILURE_GRACE = timedelta(minutes=1)
 
 # Seconds to wait before each retry of a write the board refused to connect for.
-# Boards can stop taking connections for a few seconds at a time.
-WRITE_RETRY_DELAYS = (1, 2, 4)
+# One retry covers a brief blip; longer outages fail with a clear error instead.
+WRITE_RETRY_DELAYS = (1,)
 
 # Coalesce member board updates (e.g. after writing to every board) into one refresh
 ARRAY_REFRESH_COOLDOWN = 0.5
