@@ -8,7 +8,7 @@ from datetime import datetime, time, timedelta
 import logging
 from typing import Any
 
-from aiohttp import ClientError
+from aiohttp import ClientConnectorError, ClientError
 
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
@@ -43,6 +43,10 @@ type VestaboardConfigEntry = ConfigEntry[
 # How long a board can go unread before its entities become unavailable.
 # Network or Wi-Fi hiccups can fail the odd read, so a few failed polls keep the last state.
 READ_FAILURE_GRACE = timedelta(minutes=1)
+
+# Seconds to wait before each retry of a write the board refused to connect for.
+# Boards can stop taking connections for a few seconds at a time.
+WRITE_RETRY_DELAYS = (1, 2, 4)
 
 # Coalesce member board updates (e.g. after writing to every board) into one refresh
 ARRAY_REFRESH_COOLDOWN = 0.5
@@ -230,14 +234,50 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
         self, json: dict[str, list[list[int]] | str | int]
     ) -> None:
         """Write to board and immediately update coordinator."""
-        if not await self.vestaboard.write_message(json):
-            raise UpdateFailed(f"Failed to write message to {self.name}")
+        if not await self._async_write_with_retry(json):
+            raise HomeAssistantError(
+                f"Vestaboard at {self.vestaboard.base_url} didn't accept the message"
+            )
 
         # Manually update coordinator state for instant UI feedback
         data = await self.hass.async_add_executor_job(
             self.process_data, json["characters"]
         )
         self.async_set_updated_data(data)
+
+    async def _async_write_with_retry(
+        self, json: dict[str, list[list[int]] | str | int]
+    ) -> bool:
+        """Write to the board, retrying while it refuses or can't take connections.
+
+        Only failures to connect are retried: the message was never sent, so
+        retrying can't show it twice. Other errors are raised straight away.
+        """
+        url = self.vestaboard.base_url
+        delays = iter(WRITE_RETRY_DELAYS)
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                return await self.vestaboard.write_message(json)
+            except ClientConnectorError as err:
+                if (delay := next(delays, None)) is None:
+                    raise HomeAssistantError(
+                        f"Couldn't connect to Vestaboard at {url} after "
+                        f"{attempt} attempts: {err}"
+                    ) from err
+                _LOGGER.debug(
+                    "Couldn't connect to %s (attempt %s), retrying in %ss: %r",
+                    url,
+                    attempt,
+                    delay,
+                    err,
+                )
+                await asyncio.sleep(delay)
+            except (ClientError, TimeoutError) as err:
+                raise HomeAssistantError(
+                    f"Couldn't write message to Vestaboard at {url}: {err!r}"
+                ) from err
 
     async def async_write_message(
         self,
