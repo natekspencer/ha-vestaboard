@@ -202,7 +202,13 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
             _LOGGER.debug("Reading %s recovered", self.vestaboard.base_url)
             self._read_failing_since = None
 
-        if self.temporary_message_expiration is None:
+        # Writes holding the lock set the persistent message themselves. A revert
+        # clears the expiration before writing, so until it's done (retries
+        # included) the board may still show the temporary message.
+        if (
+            self.temporary_message_expiration is None
+            and not self._temporary_message_lock.locked()
+        ):
             self._set_persistent_message(data)
 
         return await self.hass.async_add_executor_job(self.process_data, data)
