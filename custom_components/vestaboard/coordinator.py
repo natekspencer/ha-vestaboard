@@ -319,7 +319,7 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
         """Clear an active temporary message, reverting to the persistent message."""
         async with self._temporary_message_lock:
             expiration = self.temporary_message_expiration
-            if expiration and expiration > dt_util.now():
+            if expiration is not None:
                 await self._async_revert_to_persistent_message()
 
     async def _async_write_temporary_message(
@@ -379,15 +379,22 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
 
         Must be called with the temporary message lock held.
         """
+        # Clear before updating entities, but keep the temporary state on failure
+        # so a later refresh can't save the stranded alert as persistent.
+        previous = self.temporary_message_expiration
+        self.temporary_message_expiration = None
+        try:
+            if rows := self.persistent_message:
+                await self.write_and_update_state(
+                    {"characters": rows, **self.default_transition_settings}
+                )
+        except Exception:
+            self.temporary_message_expiration = previous
+            raise
         if self._cancel_cb:
             self._cancel_cb()
             self._cancel_cb = None
-        self.temporary_message_expiration = None
         self._restore_after = None
-        if rows := self.persistent_message:
-            await self.write_and_update_state(
-                {"characters": rows, **self.default_transition_settings}
-            )
 
 
 class VestaboardArrayCoordinator(

@@ -146,3 +146,71 @@ async def test_refresh_during_revert_keeps_persistent_message(
     assert refreshed
     assert coordinator.persistent_message == persistent
     assert board.data == persistent
+
+
+@pytest.mark.parametrize("expired", [False, True], ids=["clear", "expiry"])
+@pytest.mark.parametrize("recover", ["clear", "next_alert"])
+@pytest.mark.parametrize("failure", ["refused", "timeout", "unconfirmed"])
+async def test_failed_revert_keeps_persistent_message(
+    hass: HomeAssistant,
+    init_integration: MockConfigEntry,
+    expired: bool,
+    recover: str,
+    failure: str,
+) -> None:
+    """Test a failed revert can't turn the stranded alert into the persistent message."""
+    coordinator = init_integration.runtime_data
+    board = coordinator.vestaboard
+    rows, columns = len(board.data), len(board.data[0])
+    persistent = [[1] * columns for _ in range(rows)]
+    temporary = [[2] * columns for _ in range(rows)]
+    expiration = dt_util.now() + timedelta(minutes=5)
+
+    await coordinator.async_write_message({"characters": persistent})
+    await coordinator.async_write_message({"characters": temporary}, expiration)
+
+    now = expiration if expired else dt_util.now()
+    write = AsyncMock(return_value=False)
+    if failure != "unconfirmed":
+        write.side_effect = _refused() if failure == "refused" else TimeoutError()
+
+    with (
+        patch("homeassistant.util.dt.now", return_value=now),
+        patch.object(
+            coordinator,
+            "on_persistent_message",
+            wraps=coordinator.on_persistent_message,
+        ) as persistent_changed,
+    ):
+        with (
+            patch.object(board, "write_message", write),
+            pytest.raises(HomeAssistantError),
+        ):
+            if expired:
+                await coordinator._handle_temporary_message_expiration(now)
+            else:
+                await coordinator.async_clear_temporary_message()
+
+        assert write.await_count == (2 if failure == "refused" else 1)
+        assert board.data == temporary
+        assert coordinator.temporary_message_expiration == expiration
+
+        # A later successful poll must not save the stranded alert as persistent.
+        await coordinator.async_refresh()
+        assert coordinator.persistent_message == persistent
+        persistent_changed.assert_not_called()
+
+        if recover == "clear":
+            await coordinator.async_clear_temporary_message()
+        else:
+            next_expiration = now + timedelta(minutes=10)
+            await coordinator.async_write_message(
+                {"characters": [[3] * columns for _ in range(rows)]}, next_expiration
+            )
+            await coordinator._handle_temporary_message_expiration(next_expiration)
+
+    assert board.data == persistent
+    assert coordinator.data == persistent
+    assert coordinator.persistent_message == persistent
+    assert coordinator.temporary_message_expiration is None
+    assert coordinator._cancel_cb is None
