@@ -129,6 +129,11 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
     _cancel_cb: CALLBACK_TYPE | None = None
     # A temporary message to show again when the current one expires
     _restore_after: tuple[list[list[int]], datetime] | None = None
+    # Only known stranded alerts are excluded from persistent capture on failure.
+    _failed_revert_messages: tuple[list[list[int]], ...] = ()
+    _revert_retry_pending: bool = False
+    # Ignore a read begun before a newer write.
+    _write_revision: int = 0
     # Called when the persistent message changes, e.g. to save it
     on_persistent_message: Callable[[list[list[int]]], None] | None = None
 
@@ -189,6 +194,8 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
 
     async def _async_update_data(self):
         """Fetch data from Vestaboard."""
+        revision = self._write_revision
+        read_during_write = self._temporary_message_lock.locked()
         try:
             async with asyncio.timeout(10):
                 data = await self.vestaboard.read_message()
@@ -202,14 +209,43 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
             _LOGGER.debug("Reading %s recovered", self.vestaboard.base_url)
             self._read_failing_since = None
 
-        # Writes holding the lock set the persistent message themselves. A revert
-        # clears the expiration before writing, so until it's done (retries
-        # included) the board may still show the temporary message.
+        # Reads overlapping a write must not restore their stale display/cache,
+        # even if the write finishes and releases the lock before the read does.
+        if read_during_write or revision != self._write_revision:
+            return self.data
+
+        # Writes holding the lock set the persistent message themselves. Failed
+        # restores have no active expiration: reconcile their observed display
+        # separately, rather than blocking all future persistent capture.
         if (
             self.temporary_message_expiration is None
             and not self._temporary_message_lock.locked()
         ):
-            self._set_persistent_message(data)
+            if self._failed_revert_messages:
+                if (
+                    data == self.persistent_message
+                    or data not in self._failed_revert_messages
+                ):
+                    # The restore reached the board despite an error, or someone
+                    # changed the display externally. Neither needs another write.
+                    self._failed_revert_messages = ()
+                    self._revert_retry_pending = False
+                elif self._revert_retry_pending:
+                    # One recovery attempt, only after reading the stranded alert.
+                    # Never keep retrying on every poll during a prolonged outage.
+                    async with self._temporary_message_lock:
+                        try:
+                            await self._async_revert_to_persistent_message(retry=True)
+                        except HomeAssistantError:
+                            _LOGGER.warning(
+                                "Persistent message restore retry failed; "
+                                "use clear to retry or send a new message",
+                                exc_info=True,
+                            )
+                        else:
+                            data = self.data
+            if not self._failed_revert_messages:
+                self._set_persistent_message(data)
 
         return await self.hass.async_add_executor_job(self.process_data, data)
 
@@ -306,7 +342,10 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
                 self._set_persistent_message(json["characters"])
                 current = self.temporary_message_expiration
                 if not (current and current > dt_util.now()):
+                    self._write_revision += 1
                     await self.write_and_update_state(json)
+                    self._clear_temporary_state()
+                    self.async_update_listeners()
 
     def _set_persistent_message(self, rows: list[list[int]]) -> None:
         """Set the persistent message, notifying if it changed."""
@@ -319,7 +358,9 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
         """Clear an active temporary message, reverting to the persistent message."""
         async with self._temporary_message_lock:
             expiration = self.temporary_message_expiration
-            if expiration is not None:
+            if (expiration and expiration > dt_util.now()) or (
+                self._failed_revert_messages
+            ):
                 await self._async_revert_to_persistent_message()
 
     async def _async_write_temporary_message(
@@ -331,13 +372,20 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
         """
         # Set before writing, so a refresh during the write doesn't take the
         # temporary message as the persistent one; restore on failure
+        self._write_revision += 1
         previous = self.temporary_message_expiration
         self.temporary_message_expiration = expiration
         try:
             await self.write_and_update_state(json)
         except Exception:
             self.temporary_message_expiration = previous
+            if self._failed_revert_messages and (
+                json["characters"] not in self._failed_revert_messages
+            ):
+                self._failed_revert_messages += (json["characters"],)
             raise
+        self._failed_revert_messages = ()
+        self._revert_retry_pending = False
         if self._cancel_cb:
             self._cancel_cb()
         self._cancel_cb = async_track_point_in_time(
@@ -348,9 +396,10 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
         """Handle temporary message expiration."""
         async with self._temporary_message_lock:
             expiration = self.temporary_message_expiration
-            if expiration and expiration > now:
-                # A newer temporary message replaced this one while waiting
+            if expiration is None or expiration > now:
+                # Already cleared, or a newer temporary message replaced this one
                 return
+            failed_restore = None
             if (restore := self._restore_after) and restore[1] > now:
                 characters, restore_expiration = restore
                 try:
@@ -358,43 +407,63 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
                         {"characters": characters}, restore_expiration
                     )
                 except Exception:
+                    # The prior alert might have reached the board despite the error.
+                    failed_restore = characters
                     # Don't leave the expired message showing
                     _LOGGER.warning(
                         "Unable to restore the previous temporary message, "
                         "reverting to the persistent message",
                         exc_info=True,
                     )
-                    await self._async_revert_to_persistent_message()
+                else:
+                    self._restore_after = None
                     return
-                self._restore_after = None
-                return
             _LOGGER.debug(
                 "Vestaboard temporary message expired @ %s, reverting to persistent message",
                 now,
             )
-            await self._async_revert_to_persistent_message()
+            try:
+                await self._async_revert_to_persistent_message()
+            except HomeAssistantError:
+                if failed_restore is not None:
+                    self._failed_revert_messages += (failed_restore,)
+                _LOGGER.warning(
+                    "Unable to restore the persistent message; "
+                    "will reconcile on the next successful poll",
+                    exc_info=True,
+                )
 
-    async def _async_revert_to_persistent_message(self) -> None:
+    async def _async_revert_to_persistent_message(self, *, retry: bool = False) -> None:
         """Replace the temporary message with the persistent message.
 
         Must be called with the temporary message lock held.
         """
-        # Clear before updating entities, but keep the temporary state on failure
-        # so a later refresh can't save the stranded alert as persistent.
-        previous = self.temporary_message_expiration
-        self.temporary_message_expiration = None
+        self._write_revision += 1
+        previous_displays = self._failed_revert_messages or (self.data,)
+        self._clear_temporary_state()
         try:
             if rows := self.persistent_message:
                 await self.write_and_update_state(
                     {"characters": rows, **self.default_transition_settings}
                 )
-        except Exception:
-            self.temporary_message_expiration = previous
+        except HomeAssistantError:
+            # A failed/unconfirmed write need not mean the alert is still on the
+            # board. The next poll checks it before attempting one recovery write.
+            self._failed_revert_messages = previous_displays
+            self._revert_retry_pending = not retry
+            self.async_update_listeners()
             raise
+
+    @callback
+    def _clear_temporary_state(self) -> None:
+        """Discard expiration and recovery state after clearing or superseding it."""
+        self.temporary_message_expiration = None
         if self._cancel_cb:
             self._cancel_cb()
             self._cancel_cb = None
         self._restore_after = None
+        self._failed_revert_messages = ()
+        self._revert_retry_pending = False
 
 
 class VestaboardArrayCoordinator(
