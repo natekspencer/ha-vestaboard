@@ -167,7 +167,7 @@ def _assert_cleared(coordinator):
     assert coordinator._cancel_cb is None
     assert coordinator._restore_after is None
     assert not coordinator._failed_revert_messages
-    assert not coordinator._revert_retry_pending
+    assert coordinator._revert_attempt == 0
 
 
 @pytest.mark.parametrize("expired", [False, True], ids=["clear", "expiry"])
@@ -180,7 +180,7 @@ async def test_failed_revert_keeps_persistent_message(
     recover: str,
     failure: str,
 ) -> None:
-    """Protect only the stranded alert after one unsuccessful recovery attempt."""
+    """Protect stranded alerts while only the timer retries recovery."""
     coordinator = init_integration.runtime_data
     board = coordinator.vestaboard
     persistent, temporary, expiration = await _alert(coordinator)
@@ -198,10 +198,10 @@ async def test_failed_revert_keeps_persistent_message(
             with pytest.raises(HomeAssistantError):
                 await coordinator.async_clear_temporary_message()
 
-        assert coordinator.temporary_message_expiration is None
-        assert coordinator._cancel_cb is None
+        assert coordinator.temporary_message_expiration is not None
+        assert coordinator._cancel_cb is not None
         assert coordinator._restore_after is None
-        assert coordinator._revert_retry_pending
+        assert coordinator._revert_attempt > 0
         assert coordinator._failed_revert_messages == (temporary,)
 
         with patch.object(
@@ -209,15 +209,14 @@ async def test_failed_revert_keeps_persistent_message(
             "on_persistent_message",
             wraps=coordinator.on_persistent_message,
         ) as persistent_changed:
-            # Only the first good poll retries. Later polls never save the alert
-            # or restart the retry budget, even through a prolonged outage.
+            # Polling never writes, saves the alert, or resets backoff.
             for _ in range(3):
                 await coordinator.async_refresh()
                 assert coordinator.persistent_message == persistent
             persistent_changed.assert_not_called()
 
-    assert write.await_count == (4 if failure == "refused" else 2)
-    assert not coordinator._revert_retry_pending
+    assert write.await_count == (2 if failure == "refused" else 1)
+    assert coordinator._revert_attempt == 1
     assert board.data == temporary
 
     if recover == "clear":
@@ -227,6 +226,10 @@ async def test_failed_revert_keeps_persistent_message(
         await coordinator._handle_temporary_message_expiration(expiration)
     elif recover == "persistent":
         await coordinator.async_write_message({"characters": replacement})
+        assert board.data == temporary
+        await coordinator._handle_temporary_message_expiration(
+            coordinator.temporary_message_expiration
+        )
         persistent = replacement
     else:
         # A change from the native app is learned, not overwritten by a retry.
@@ -248,10 +251,10 @@ async def test_failed_revert_keeps_persistent_message(
     assert coordinator.persistent_message == external
 
 
-async def test_failed_revert_recovers_on_next_successful_poll(
+async def test_failed_revert_recovers_on_next_timer(
     hass: HomeAssistant, init_integration: MockConfigEntry
 ) -> None:
-    """A successful read of the stranded alert permits one recovery write."""
+    """A successful read does not write; the next timer restores the board."""
     coordinator = init_integration.runtime_data
     persistent, _, expiration = await _alert(coordinator)
     board = coordinator.vestaboard
@@ -261,10 +264,14 @@ async def test_failed_revert_recovers_on_next_successful_poll(
     # Failed reads do not use up the recovery attempt.
     with patch.object(board, "read_message", AsyncMock(side_effect=TimeoutError())):
         await coordinator.async_refresh()
-    assert coordinator._revert_retry_pending
+    assert coordinator._revert_attempt > 0
 
     with patch.object(board, "write_message", wraps=board.write_message) as write:
         await coordinator.async_refresh()
+        write.assert_not_called()
+        await coordinator._handle_temporary_message_expiration(
+            coordinator.temporary_message_expiration
+        )
         await coordinator.async_refresh()
     assert write.await_count == 1
     assert board.data == persistent
@@ -294,7 +301,9 @@ async def test_unconfirmed_restore_that_reached_board_is_not_replayed(
 
     with patch.object(board, "write_message", side_effect=write_then_timeout) as write:
         if during_retry:
-            await coordinator.async_refresh()
+            await coordinator._handle_temporary_message_expiration(
+                coordinator.temporary_message_expiration
+            )
         else:
             await coordinator._handle_temporary_message_expiration(expiration)
         await coordinator.async_refresh()
@@ -403,6 +412,9 @@ async def test_read_started_before_new_write_cannot_capture_old_alert(
         refresh = asyncio.create_task(coordinator.async_refresh())
         await started.wait()
         await coordinator.async_write_message({"characters": external})
+        await coordinator._handle_temporary_message_expiration(
+            coordinator.temporary_message_expiration
+        )
         release.set()
         await refresh
     assert coordinator.persistent_message == external
@@ -410,10 +422,10 @@ async def test_read_started_before_new_write_cannot_capture_old_alert(
     _assert_cleared(coordinator)
 
 
-async def test_failed_expiration_clears_sensor_and_array_expiration(
+async def test_failed_expiration_rearms_sensor_and_array_expiration(
     hass: HomeAssistant, init_integration: MockConfigEntry
 ) -> None:
-    """A failed restore is not advertised as an active/expired temporary timer."""
+    """A failed restore is advertised with its future retry expiration."""
     from custom_components.vestaboard.coordinator import VestaboardArrayCoordinator
 
     coordinator = init_integration.runtime_data
@@ -423,19 +435,22 @@ async def test_failed_expiration_clears_sensor_and_array_expiration(
         coordinator.vestaboard, "write_message", AsyncMock(side_effect=TimeoutError())
     ):
         await coordinator._handle_temporary_message_expiration(expiration)
-    assert hass.states.get("binary_sensor.test_board_temporary_message").state == "off"
+    assert hass.states.get("binary_sensor.test_board_temporary_message").state == "on"
     assert (
         hass.states.get("sensor.test_board_temporary_message_expiration").state
-        == "unknown"
+        != "unknown"
     )
-    # The array property must not retain a failed member's old expiration.
+    # The array reports the retry deadline, not the expired alert deadline.
     array = MagicMock()
     array.members.return_value = [[coordinator]]
-    assert VestaboardArrayCoordinator.temporary_message_expiration.fget(array) is None
+    assert (
+        VestaboardArrayCoordinator.temporary_message_expiration.fget(array)
+        == coordinator.temporary_message_expiration
+    )
     await coordinator.async_clear_temporary_message()
 
 
-async def test_failed_parent_restore_also_has_bounded_recovery(
+async def test_failed_parent_restore_also_uses_timer_recovery(
     hass: HomeAssistant, init_integration: MockConfigEntry
 ) -> None:
     """Failure restoring both a previous alert and the persistent message is contained."""
@@ -448,10 +463,13 @@ async def test_failed_parent_restore_also_has_bounded_recovery(
     ) as write:
         await coordinator._handle_temporary_message_expiration(expiration)
         assert write.await_count == 2
-        assert coordinator.temporary_message_expiration is None
+        assert coordinator.temporary_message_expiration is not None
         assert coordinator._restore_after is None
-        assert coordinator._cancel_cb is None
+        assert coordinator._cancel_cb is not None
     await coordinator.async_refresh()
+    await coordinator._handle_temporary_message_expiration(
+        coordinator.temporary_message_expiration
+    )
     assert coordinator.vestaboard.data == persistent
     _assert_cleared(coordinator)
 
@@ -529,6 +547,9 @@ async def test_unconfirmed_alert_during_recovery_is_not_saved_as_persistent(
     assert board.data == other_alert
     await coordinator.async_refresh()
     assert coordinator.persistent_message == persistent
+    await coordinator._handle_temporary_message_expiration(
+        coordinator.temporary_message_expiration
+    )
     assert board.data == persistent
     _assert_cleared(coordinator)
 
@@ -581,4 +602,144 @@ async def test_unconfirmed_alert_before_recovery_preserves_both_possible_display
 
     await coordinator.async_clear_temporary_message()
     assert board.data == persistent
+    _assert_cleared(coordinator)
+
+
+async def test_revert_backoff_and_poll_narrowing(hass, init_integration):
+    """Retry only on deadlines, narrowing uncertain content on fresh reads."""
+    coordinator = init_integration.runtime_data
+    _, temporary, expiration = await _alert(coordinator)
+    other = [[3] * len(temporary[0]) for _ in temporary]
+    coordinator._failed_revert_messages = (temporary, other)
+    board = coordinator.vestaboard
+    now = dt_util.now()
+    with (
+        patch("homeassistant.util.dt.now", return_value=now) as clock,
+        patch.object(
+            board, "write_message", AsyncMock(side_effect=TimeoutError())
+        ) as write,
+    ):
+        for attempt, seconds in enumerate((30, 60, 120, 300, 300), 1):
+            await coordinator._handle_temporary_message_expiration(expiration)
+            expiration = coordinator.temporary_message_expiration
+            assert expiration == now + timedelta(seconds=seconds)
+            assert coordinator._revert_attempt == attempt
+            await coordinator.async_refresh()
+            assert coordinator._failed_revert_messages == (temporary,)
+            assert write.await_count == attempt
+            now = expiration
+            clock.return_value = now
+    await coordinator.async_clear_temporary_message()
+    _assert_cleared(coordinator)
+
+
+@pytest.mark.parametrize(
+    "error", [RuntimeError("executor failed"), asyncio.CancelledError()]
+)
+async def test_revert_retains_tracking_on_unexpected_error(
+    hass, init_integration, error
+):
+    """Cancellation propagates without a new timer; other errors schedule recovery."""
+    coordinator = init_integration.runtime_data
+    persistent, temporary, _ = await _alert(coordinator)
+    with (
+        patch.object(
+            coordinator.vestaboard, "write_message", AsyncMock(side_effect=error)
+        ),
+        pytest.raises(type(error)),
+    ):
+        await coordinator.async_clear_temporary_message()
+    assert coordinator._failed_revert_messages == (temporary,)
+    assert bool(coordinator._cancel_cb) == (
+        not isinstance(error, asyncio.CancelledError)
+    )
+    await coordinator.async_refresh()
+    assert coordinator.persistent_message == persistent
+    await coordinator.async_clear_temporary_message()
+    _assert_cleared(coordinator)
+
+
+async def test_persistent_write_preserves_queued_parent_restore(hass, init_integration):
+    """A persistent write between deadline and callback must not discard the parent."""
+    coordinator = init_integration.runtime_data
+    _, temporary, expiration = await _alert(coordinator)
+    parent = [[3] * len(temporary[0]) for _ in temporary]
+    replacement = [[4] * len(temporary[0]) for _ in temporary]
+    parent_expiration = expiration + timedelta(minutes=5)
+    coordinator._restore_after = (parent, parent_expiration)
+    with patch("homeassistant.util.dt.now", return_value=expiration):
+        await coordinator.async_write_message({"characters": replacement})
+        assert coordinator.vestaboard.data == replacement
+        await coordinator._handle_temporary_message_expiration(expiration)
+    assert coordinator.vestaboard.data == parent
+    assert coordinator.temporary_message_expiration == parent_expiration
+    await coordinator.async_clear_temporary_message()
+    assert coordinator.vestaboard.data == replacement
+    _assert_cleared(coordinator)
+
+
+async def test_stale_initial_read_does_not_publish_none(hass, init_integration):
+    """A stale first read is a failed update, not successful uninitialized data."""
+    from homeassistant.helpers.update_coordinator import UpdateFailed
+
+    coordinator = init_integration.runtime_data
+    coordinator.data = None
+    async with coordinator._temporary_message_lock:
+        with pytest.raises(UpdateFailed, match="superseded"):
+            await coordinator._async_update_data()
+
+
+async def test_retry_callback_runs_from_ha_timer(hass, init_integration):
+    """The actual HA timer recovers without any successful poll initiating writes."""
+    try:
+        from pytest_homeassistant.common import async_fire_time_changed
+    except ImportError:  # Home Assistant < 2026.11
+        from pytest_homeassistant_custom_component.common import async_fire_time_changed
+
+    coordinator = init_integration.runtime_data
+    persistent, _, expiration = await _alert(coordinator)
+    with patch.object(
+        coordinator.vestaboard, "write_message", AsyncMock(side_effect=TimeoutError())
+    ):
+        await coordinator._handle_temporary_message_expiration(expiration)
+    deadline = coordinator.temporary_message_expiration
+    async_fire_time_changed(hass, deadline + timedelta(seconds=1))
+    await hass.async_block_till_done()
+    assert coordinator.vestaboard.data == persistent
+    _assert_cleared(coordinator)
+
+
+async def test_persistent_write_notifies_once(hass, init_integration):
+    """State is cleared before publishing the persistent write's one update."""
+    coordinator = init_integration.runtime_data
+    with patch.object(
+        coordinator, "async_update_listeners", wraps=coordinator.async_update_listeners
+    ) as notify:
+        await coordinator.async_write_message(
+            {"characters": [[1] * 22 for _ in range(6)]}
+        )
+    assert notify.call_count == 1
+
+
+async def test_queued_persistent_update_after_lost_restore_ack(hass, init_integration):
+    """An old successful restore must not overwrite a newly queued persistent target."""
+    coordinator = init_integration.runtime_data
+    _, temporary, expiration = await _alert(coordinator)
+    board = coordinator.vestaboard
+    original_write = board.write_message
+
+    async def accepted_without_ack(payload):
+        await original_write(payload)
+        raise TimeoutError
+
+    with patch.object(board, "write_message", side_effect=accepted_without_ack):
+        await coordinator._handle_temporary_message_expiration(expiration)
+    replacement = [[4] * len(temporary[0]) for _ in temporary]
+    await coordinator.async_write_message({"characters": replacement})
+    await coordinator.async_refresh()
+    assert coordinator.persistent_message == replacement
+    await coordinator._handle_temporary_message_expiration(
+        coordinator.temporary_message_expiration
+    )
+    assert board.data == replacement
     _assert_cleared(coordinator)
