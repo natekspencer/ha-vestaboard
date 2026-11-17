@@ -343,8 +343,11 @@ async def test_clear_and_queued_expiration_write_only_once(
     _assert_cleared(coordinator)
 
 
+@pytest.mark.parametrize("unconfirmed_replacement", [False, True])
 async def test_clear_after_expiration_leaves_pending_restore_to_callback(
-    hass: HomeAssistant, init_integration: MockConfigEntry
+    hass: HomeAssistant,
+    init_integration: MockConfigEntry,
+    unconfirmed_replacement: bool,
 ) -> None:
     """Clear must not discard the previous temporary message at expiration."""
     coordinator = init_integration.runtime_data
@@ -353,6 +356,14 @@ async def test_clear_after_expiration_leaves_pending_restore_to_callback(
     parent_expiration = expiration + timedelta(minutes=5)
     coordinator._restore_after = (parent, parent_expiration)
     board = coordinator.vestaboard
+    if unconfirmed_replacement:
+        with (
+            patch.object(board, "write_message", AsyncMock(side_effect=TimeoutError())),
+            pytest.raises(HomeAssistantError),
+        ):
+            await coordinator.async_write_message(
+                {"characters": parent}, parent_expiration
+            )
     with (
         patch("homeassistant.util.dt.now", return_value=expiration),
         patch.object(board, "write_message", wraps=board.write_message) as write,
@@ -518,5 +529,56 @@ async def test_unconfirmed_alert_during_recovery_is_not_saved_as_persistent(
     assert board.data == other_alert
     await coordinator.async_refresh()
     assert coordinator.persistent_message == persistent
+    assert board.data == persistent
+    _assert_cleared(coordinator)
+
+
+@pytest.mark.parametrize("accepted", [False, True], ids=["not_applied", "applied"])
+@pytest.mark.parametrize("failure", ["timeout", "unconfirmed"])
+async def test_unconfirmed_alert_before_recovery_preserves_both_possible_displays(
+    hass: HomeAssistant,
+    init_integration: MockConfigEntry,
+    accepted: bool,
+    failure: str,
+) -> None:
+    """Neither the old alert nor an unconfirmed replacement may become persistent."""
+    coordinator = init_integration.runtime_data
+    persistent, temporary, expiration = await _alert(coordinator)
+    board = coordinator.vestaboard
+    replacement = [[3] * len(temporary[0]) for _ in temporary]
+    original_write = board.write_message
+
+    async def unconfirmed_alert(json):
+        if accepted:
+            await original_write(json)
+        if failure == "timeout":
+            raise TimeoutError
+        return False
+
+    # No failed-revert state exists yet. B may replace A physically without
+    # updating the cached display or replacing A's existing expiration timer.
+    with (
+        patch.object(board, "write_message", side_effect=unconfirmed_alert),
+        pytest.raises(HomeAssistantError),
+    ):
+        await coordinator.async_write_message(
+            {"characters": replacement}, expiration + timedelta(minutes=5)
+        )
+    assert coordinator.data == temporary
+    assert board.data == (replacement if accepted else temporary)
+
+    # Do not poll between B's unconfirmed write and A's failed expiration restore.
+    with patch.object(board, "write_message", AsyncMock(side_effect=TimeoutError())):
+        await coordinator._handle_temporary_message_expiration(expiration)
+        with patch.object(
+            coordinator,
+            "on_persistent_message",
+            wraps=coordinator.on_persistent_message,
+        ) as persistent_changed:
+            await coordinator.async_refresh()
+            assert coordinator.persistent_message == persistent
+            persistent_changed.assert_not_called()
+
+    await coordinator.async_clear_temporary_message()
     assert board.data == persistent
     _assert_cleared(coordinator)

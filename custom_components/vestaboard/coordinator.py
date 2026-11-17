@@ -129,7 +129,7 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
     _cancel_cb: CALLBACK_TYPE | None = None
     # A temporary message to show again when the current one expires
     _restore_after: tuple[list[list[int]], datetime] | None = None
-    # Only known stranded alerts are excluded from persistent capture on failure.
+    # Known temporary displays excluded from persistent capture after failed writes.
     _failed_revert_messages: tuple[list[list[int]], ...] = ()
     _revert_retry_pending: bool = False
     # Ignore a read begun before a newer write.
@@ -359,7 +359,7 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
         async with self._temporary_message_lock:
             expiration = self.temporary_message_expiration
             if (expiration and expiration > dt_util.now()) or (
-                self._failed_revert_messages
+                expiration is None and self._failed_revert_messages
             ):
                 await self._async_revert_to_persistent_message()
 
@@ -379,9 +379,7 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
             await self.write_and_update_state(json)
         except Exception:
             self.temporary_message_expiration = previous
-            if self._failed_revert_messages and (
-                json["characters"] not in self._failed_revert_messages
-            ):
+            if json["characters"] not in self._failed_revert_messages:
                 self._failed_revert_messages += (json["characters"],)
             raise
         self._failed_revert_messages = ()
@@ -399,7 +397,6 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
             if expiration is None or expiration > now:
                 # Already cleared, or a newer temporary message replaced this one
                 return
-            failed_restore = None
             if (restore := self._restore_after) and restore[1] > now:
                 characters, restore_expiration = restore
                 try:
@@ -407,8 +404,6 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
                         {"characters": characters}, restore_expiration
                     )
                 except Exception:
-                    # The prior alert might have reached the board despite the error.
-                    failed_restore = characters
                     # Don't leave the expired message showing
                     _LOGGER.warning(
                         "Unable to restore the previous temporary message, "
@@ -425,8 +420,6 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
             try:
                 await self._async_revert_to_persistent_message()
             except HomeAssistantError:
-                if failed_restore is not None:
-                    self._failed_revert_messages += (failed_restore,)
                 _LOGGER.warning(
                     "Unable to restore the persistent message; "
                     "will reconcile on the next successful poll",
@@ -439,7 +432,9 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
         Must be called with the temporary message lock held.
         """
         self._write_revision += 1
-        previous_displays = self._failed_revert_messages or (self.data,)
+        previous_displays = self._failed_revert_messages
+        if self.data is not None and self.data not in previous_displays:
+            previous_displays += (self.data,)
         self._clear_temporary_state()
         try:
             if rows := self.persistent_message:
