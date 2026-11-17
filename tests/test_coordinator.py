@@ -422,6 +422,34 @@ async def test_read_started_before_new_write_cannot_capture_old_alert(
     _assert_cleared(coordinator)
 
 
+async def test_read_waiting_behind_clear_cannot_capture_old_alert(
+    hass: HomeAssistant, init_integration: MockConfigEntry
+) -> None:
+    """Recheck freshness after a fair lock acquisition yields to queued clear."""
+    coordinator = init_integration.runtime_data
+    persistent, temporary, _ = await _alert(coordinator)
+    lock = coordinator._temporary_message_lock
+    await lock.acquire()
+    clear = asyncio.create_task(coordinator.async_clear_temporary_message())
+    await asyncio.sleep(0)  # Clear is now queued on the real asyncio lock.
+    lock.release()  # Wake clear without running it yet.
+    assert not lock.locked()
+    revision = coordinator._write_revision
+    try:
+        # The virtual board read does not suspend. Poll passes its initial
+        # checks, then fair acquisition puts it behind the awakened clear.
+        data = await coordinator._async_update_data()
+    finally:
+        await clear
+    assert coordinator._write_revision > revision
+    assert coordinator.vestaboard.data == persistent
+    assert coordinator.persistent_message == persistent
+    assert coordinator.data == persistent
+    assert data == persistent
+    assert data != temporary
+    _assert_cleared(coordinator)
+
+
 async def test_failed_expiration_rearms_sensor_and_array_expiration(
     hass: HomeAssistant, init_integration: MockConfigEntry
 ) -> None:

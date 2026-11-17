@@ -229,6 +229,14 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
 
         # Serialize reconciliation/rendering with writes, after rejecting overlap.
         async with self._temporary_message_lock:
+            # A queued writer can run while fair lock acquisition suspends,
+            # even when locked() was false before acquisition.
+            if revision != self._write_revision:
+                if self.data is None:
+                    raise UpdateFailed(
+                        "Read superseded by a write; waiting for fresh data"
+                    )
+                return self.data
             if self._failed_revert_messages:
                 if (
                     data == self.persistent_message
