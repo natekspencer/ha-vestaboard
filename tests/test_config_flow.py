@@ -97,3 +97,32 @@ async def test_virtual_note_has_no_heart(hass: HomeAssistant) -> None:
 
     assert result["step_id"] == "appearance"
     assert CONF_HEART not in result["data_schema"].schema
+
+
+async def test_identify_does_not_restore_stranded_alert(hass):
+    """Identify cleanup restores persistent content, not a recovery-time alert."""
+    from datetime import timedelta
+    from unittest.mock import AsyncMock, patch
+
+    from custom_components.vestaboard.config_flow import VestaboardConfigFlow
+    import homeassistant.util.dt as dt_util
+
+    entry = await setup_virtual_board(hass, "Note", MODEL_NOTE)
+    c = entry.runtime_data
+    persistent = c.persistent_message
+    alert = [[3] * len(c.data[0]) for _ in c.data]
+    expiration = dt_util.now() + timedelta(minutes=5)
+    await c.async_write_message({"characters": alert}, expiration)
+    with patch.object(
+        c.vestaboard, "write_message", AsyncMock(side_effect=TimeoutError())
+    ):
+        await c._handle_temporary_message_expiration(expiration)
+    flow = VestaboardConfigFlow()
+    flow.hass = hass
+    await flow._async_identify_boards()
+    assert flow.identified_boards[entry.entry_id] is None
+    assert c._restore_after is None
+    flow.async_remove()
+    await hass.async_block_till_done()
+    assert c.vestaboard.data == persistent
+    assert c.temporary_message_expiration is None
