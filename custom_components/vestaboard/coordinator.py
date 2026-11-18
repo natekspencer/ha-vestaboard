@@ -405,7 +405,8 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
                 current = self.temporary_message_expiration
                 if not (current and current > dt_util.now()):
                     await self._async_revert_to_persistent_message(
-                        preserve_parent=bool(current and self._restore_after)
+                        preserve_parent=bool(current and self._restore_after),
+                        payload=json,
                     )
 
     def _set_persistent_message(self, rows: list[list[int]]) -> None:
@@ -483,6 +484,12 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
                     await self._async_write_temporary_message(
                         {"characters": characters}, restore_expiration
                     )
+                except WriteCancelledBeforeSend:
+                    # The child is still showing and the fired timer is spent.
+                    # Keep the parent handoff and retry it while it is live.
+                    self._restore_after = restore
+                    self._schedule_revert_retry()
+                    raise
                 except Exception:
                     # Don't leave the expired message showing
                     _LOGGER.warning(
@@ -506,9 +513,11 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
                 )
 
     async def _async_revert_to_persistent_message(
-        self, preserve_parent: bool = False
+        self,
+        preserve_parent: bool = False,
+        payload: dict[str, list[list[int]] | str | int] | None = None,
     ) -> None:
-        """One failure path for explicit writes, clears and timer restoration."""
+        """Restore with caller settings for immediate writes, defaults otherwise."""
         displays = self._failed_revert_messages
         if (
             self.temporary_message_expiration
@@ -527,7 +536,9 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
         try:
             if target is not None:
                 await self.write_and_update_state(
-                    {"characters": target, **self.default_transition_settings}
+                    payload
+                    if payload is not None
+                    else {"characters": target, **self.default_transition_settings}
                 )
         except (Exception, asyncio.CancelledError) as err:
             self._failed_revert_messages = displays

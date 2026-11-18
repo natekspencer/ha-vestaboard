@@ -1033,3 +1033,108 @@ async def test_uncertain_identify_write_retains_requested_parent(
     assert c.vestaboard.data == parent
     assert c.temporary_message_expiration == parent_deadline
     await c.async_clear_temporary_message()
+
+
+@pytest.mark.parametrize("expired_parent", [False, True])
+async def test_immediate_persistent_write_preserves_supplied_settings(
+    hass, init_integration, expired_parent
+):
+    """The immediate service path forwards caller settings, not restore defaults."""
+    c = init_integration.runtime_data
+    now = dt_util.now()
+    rows = [[4] * len(c.data[0]) for _ in c.data]
+    if expired_parent:
+        _, child, now = await _alert(c)
+        c._restore_after = (child, now + timedelta(minutes=5))
+    payload = {
+        "characters": rows,
+        "strategy": "random",
+        "step_interval_ms": 123,
+        "step_size": 2,
+    }
+    with (
+        patch("homeassistant.util.dt.now", return_value=now),
+        patch.object(
+            c.vestaboard, "write_message", wraps=c.vestaboard.write_message
+        ) as write,
+    ):
+        await c.async_write_message(payload)
+    write.assert_awaited_once_with(payload)
+    assert c.vestaboard.data == rows
+    if expired_parent:
+        await c._handle_temporary_message_expiration(now)
+    await c.async_clear_temporary_message()
+
+
+@pytest.mark.parametrize("parent_expires_before_retry", [False, True])
+async def test_cancelled_queued_parent_connect_retry_rearms_timer(
+    hass, init_integration, parent_expires_before_retry
+):
+    """Cancellation before admission preserves the parent and real timer recovery."""
+    try:
+        from pytest_homeassistant.common import async_fire_time_changed
+    except ImportError:  # Home Assistant < 2026.11
+        from pytest_homeassistant_custom_component.common import async_fire_time_changed
+
+    c = init_integration.runtime_data
+    persistent, child, deadline = await _alert(c)
+    parent = [[3] * len(child[0]) for _ in child]
+    parent_deadline = deadline + timedelta(
+        seconds=10 if parent_expires_before_retry else 300
+    )
+    c._restore_after = (parent, parent_deadline)
+    with (
+        patch("homeassistant.util.dt.now", return_value=deadline),
+        patch("custom_components.vestaboard.coordinator.WRITE_RETRY_DELAYS", (60,)),
+        patch.object(
+            c.vestaboard, "write_message", AsyncMock(side_effect=_refused())
+        ) as write,
+    ):
+        task = asyncio.create_task(c._handle_temporary_message_expiration(deadline))
+        await asyncio.sleep(0)
+        assert write.await_count == 1
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    retry = c.temporary_message_expiration
+    assert retry > deadline
+    assert c._restore_after == (parent, parent_deadline)
+    assert c._cancel_cb is not None
+    assert not c._failed_revert_messages  # The parent was never sent.
+    assert c.vestaboard.data == child
+    await c.async_refresh()  # Polling must not steal the timer's handoff.
+    async_fire_time_changed(hass, retry + timedelta(seconds=1))
+    await hass.async_block_till_done()
+    if parent_expires_before_retry:
+        assert c.vestaboard.data == persistent
+        _assert_cleared(c)
+    else:
+        assert c.vestaboard.data == parent
+        assert c.temporary_message_expiration == parent_deadline
+        assert c._restore_after is None
+        async_fire_time_changed(hass, parent_deadline + timedelta(seconds=1))
+        await hass.async_block_till_done()
+        assert c.vestaboard.data == persistent
+        _assert_cleared(c)
+
+
+@pytest.mark.parametrize("restore", ["clear", "timer"])
+async def test_deferred_restore_uses_default_transition_settings(
+    hass, init_integration, restore
+):
+    """Caller settings belong to immediate writes, not later automatic restores."""
+    c = init_integration.runtime_data
+    defaults = {"strategy": "column", "step_interval_ms": 321}
+    hass.config_entries.async_update_entry(
+        init_integration, options={**init_integration.options, "strategy": defaults}
+    )
+    persistent, _, deadline = await _alert(c)
+    with patch.object(
+        c.vestaboard, "write_message", wraps=c.vestaboard.write_message
+    ) as write:
+        if restore == "clear":
+            await c.async_clear_temporary_message()
+        else:
+            await c._handle_temporary_message_expiration(deadline)
+    write.assert_awaited_once_with({"characters": persistent, **defaults})
+    _assert_cleared(c)
