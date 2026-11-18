@@ -362,7 +362,7 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
         attempt = 0
         while True:
             if self._shutdown_requested:
-                raise WriteCancelledBeforeSend
+                raise WriteNotSent(f"Coordinator for {url} is shut down")
             attempt += 1
             try:
                 return await self.vestaboard.write_message(json)
@@ -522,7 +522,12 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
                     self._restore_after = restore
                     self._schedule_revert_retry()
                     raise
-                except Exception:
+                except Exception as err:
+                    if isinstance(err, WriteNotSent) and self._shutdown_requested:
+                        # Unload rejected the parent before send. Leave the
+                        # handoff for shutdown cleanup, without another write.
+                        self._restore_after = restore
+                        return
                     # Don't leave the expired message showing
                     _LOGGER.warning(
                         "Unable to restore the previous temporary message, "

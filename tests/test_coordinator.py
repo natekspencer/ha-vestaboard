@@ -1259,3 +1259,64 @@ async def test_unload_stops_old_recovery(hass, init_integration, phase):
         c._schedule_revert_retry()
         assert c._cancel_cb is None
         assert write.await_count == calls
+
+
+@pytest.mark.parametrize("shutdown_during_backoff", [False, True])
+async def test_service_write_on_shutdown_is_error_not_cancellation(
+    hass, init_integration, shutdown_during_backoff
+):
+    """A service rejected before send fails normally, without cancelling its task."""
+    c = init_integration.runtime_data
+
+    async def refuse_and_shutdown(payload):
+        c._shutdown_requested = True
+        raise _refused()
+
+    if not shutdown_during_backoff:
+        await c.async_shutdown()
+    with (
+        patch.object(
+            c.vestaboard, "write_message", side_effect=refuse_and_shutdown
+        ) as write,
+        pytest.raises(HomeAssistantError, match="shut down"),
+    ):
+        await _send(hass, init_integration)
+    assert write.await_count == int(shutdown_during_backoff)
+
+
+async def test_parent_restore_shutdown_does_not_attempt_persistent_revert(
+    hass, init_integration
+):
+    """Shutdown during refused-parent backoff retains handoff without another write."""
+    c = init_integration.runtime_data
+    persistent, child, deadline = await _alert(c)
+    parent = [[3] * len(child[0]) for _ in child]
+    handoff = (parent, deadline + timedelta(minutes=5))
+    c._restore_after = handoff
+
+    async def refuse_and_shutdown(payload):
+        c._shutdown_requested = True
+        raise _refused()
+
+    with (
+        patch("homeassistant.util.dt.now", return_value=deadline),
+        patch.object(
+            c.vestaboard, "write_message", side_effect=refuse_and_shutdown
+        ) as write,
+        patch.object(
+            c,
+            "_async_revert_to_persistent_message",
+            wraps=c._async_revert_to_persistent_message,
+        ) as revert,
+        patch.object(c, "_arm_expiration", wraps=c._arm_expiration) as arm,
+    ):
+        await c._handle_temporary_message_expiration(deadline)
+    write.assert_awaited_once_with({"characters": parent})
+    revert.assert_not_awaited()
+    arm.assert_not_called()
+    assert c._restore_after == handoff
+    assert c.temporary_message_expiration == deadline
+    assert c.persistent_message == persistent
+    assert c.vestaboard.data == child
+    assert not c._failed_revert_messages
+    await c.async_shutdown()
