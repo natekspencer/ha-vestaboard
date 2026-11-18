@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Generator
 from datetime import timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 from aiohttp import ClientConnectorError, ClientResponseError, ServerDisconnectedError
 import pytest
@@ -1103,8 +1103,9 @@ async def test_cancelled_queued_parent_connect_retry_rearms_timer(
     assert not c._failed_revert_messages  # The parent was never sent.
     assert c.vestaboard.data == child
     await c.async_refresh()  # Polling must not steal the timer's handoff.
-    async_fire_time_changed(hass, retry + timedelta(seconds=1))
-    await hass.async_block_till_done()
+    with patch("homeassistant.util.dt.now", return_value=retry + timedelta(seconds=1)):
+        async_fire_time_changed(hass, retry + timedelta(seconds=1))
+        await hass.async_block_till_done()
     if parent_expires_before_retry:
         assert c.vestaboard.data == persistent
         _assert_cleared(c)
@@ -1125,16 +1126,136 @@ async def test_deferred_restore_uses_default_transition_settings(
     """Caller settings belong to immediate writes, not later automatic restores."""
     c = init_integration.runtime_data
     defaults = {"strategy": "column", "step_interval_ms": 321}
-    hass.config_entries.async_update_entry(
-        init_integration, options={**init_integration.options, "strategy": defaults}
-    )
     persistent, _, deadline = await _alert(c)
-    with patch.object(
-        c.vestaboard, "write_message", wraps=c.vestaboard.write_message
-    ) as write:
+    with (
+        patch.object(
+            type(c),
+            "default_transition_settings",
+            new_callable=PropertyMock,
+            return_value=defaults,
+        ),
+        patch.object(
+            c.vestaboard, "write_message", wraps=c.vestaboard.write_message
+        ) as write,
+    ):
         if restore == "clear":
             await c.async_clear_temporary_message()
         else:
             await c._handle_temporary_message_expiration(deadline)
     write.assert_awaited_once_with({"characters": persistent, **defaults})
     _assert_cleared(c)
+
+
+async def test_persistent_confirmation_keeps_cancelled_parent_retry(
+    hass, init_integration
+):
+    """A fresh poll resolves a lost ack without dropping an owed parent retry."""
+    c = init_integration.runtime_data
+    _, child, deadline = await _alert(c)
+    parent = [[3] * len(child[0]) for _ in child]
+    c._restore_after = (parent, deadline + timedelta(minutes=5))
+    replacement = [[4] * len(child[0]) for _ in child]
+    original = c.vestaboard.write_message
+
+    async def accepted(payload):
+        await original(payload)
+        raise TimeoutError
+
+    with patch("homeassistant.util.dt.now", return_value=deadline):
+        with (
+            patch.object(c.vestaboard, "write_message", side_effect=accepted),
+            pytest.raises(HomeAssistantError),
+        ):
+            await c.async_write_message({"characters": replacement})
+        with (
+            patch("custom_components.vestaboard.coordinator.WRITE_RETRY_DELAYS", (60,)),
+            patch.object(c.vestaboard, "write_message", side_effect=_refused()),
+        ):
+            task = asyncio.create_task(c._handle_temporary_message_expiration(deadline))
+            await asyncio.sleep(0)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        retry = c.temporary_message_expiration
+        await c.async_refresh()
+        assert not c._failed_revert_messages
+        assert c.temporary_message_expiration == retry
+        assert c._restore_after == (parent, deadline + timedelta(minutes=5))
+        assert c._cancel_cb is not None
+    with patch("homeassistant.util.dt.now", return_value=retry):
+        await c._handle_temporary_message_expiration(retry)
+    assert c.vestaboard.data == parent
+    await c.async_clear_temporary_message()
+
+
+@pytest.mark.parametrize("late", [False, True])
+async def test_parent_deadline_checked_after_waiting_for_lock(
+    hass, init_integration, late
+):
+    """Scheduled callback time cannot authorize an already expired parent."""
+    c = init_integration.runtime_data
+    persistent, child, deadline = await _alert(c)
+    parent = [[3] * len(child[0]) for _ in child]
+    c._restore_after = (parent, deadline + timedelta(seconds=5))
+    await c._temporary_message_lock.acquire()
+    task = asyncio.create_task(c._handle_temporary_message_expiration(deadline))
+    await asyncio.sleep(0)
+    with (
+        patch(
+            "homeassistant.util.dt.now",
+            return_value=deadline + timedelta(seconds=10 if late else 1),
+        ),
+        patch.object(
+            c.vestaboard, "write_message", wraps=c.vestaboard.write_message
+        ) as write,
+    ):
+        c._temporary_message_lock.release()
+        await task
+    write.assert_awaited_once_with({"characters": persistent if late else parent})
+    await c.async_clear_temporary_message()
+
+
+@pytest.mark.parametrize("phase", ["scheduled", "queued", "backoff", "writing"])
+async def test_unload_stops_old_recovery(hass, init_integration, phase):
+    """Real entry unload fences pending, lock-queued and running recovery."""
+    c = init_integration.runtime_data
+    _, _, deadline = await _alert(c)
+    task = None
+
+    async def blocked_write(payload):
+        await asyncio.Future()
+
+    if phase == "scheduled":
+        c._schedule_revert_retry()
+        deadline = c.temporary_message_expiration
+    with (
+        patch("homeassistant.util.dt.now", return_value=deadline),
+        patch("custom_components.vestaboard.coordinator.WRITE_RETRY_DELAYS", (60,)),
+        patch.object(
+            c.vestaboard,
+            "write_message",
+            side_effect=blocked_write if phase == "writing" else _refused(),
+        ) as write,
+    ):
+        if phase == "queued":
+            await c._temporary_message_lock.acquire()
+        if phase != "scheduled":
+            task = asyncio.create_task(c._handle_temporary_message_expiration(deadline))
+            await asyncio.sleep(0)
+        calls = write.await_count
+        assert await hass.config_entries.async_unload(init_integration.entry_id)
+        if phase == "queued":
+            c._temporary_message_lock.release()
+        if task is not None:
+            completed_on_unload = task.done()
+            if not completed_on_unload:
+                task.cancel()  # Cleanup old-head regressions without a 60s wait.
+            await asyncio.gather(task, return_exceptions=True)
+            assert completed_on_unload
+        assert c._cancel_cb is None
+        assert c.temporary_message_expiration is None
+        # Even a callback already dispatched by HA may enter after shutdown.
+        await c._handle_temporary_message_expiration(deadline)
+        c._schedule_revert_retry()
+        assert c._cancel_cb is None
+        assert write.await_count == calls

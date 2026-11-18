@@ -173,11 +173,24 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
         self.vestaboard = vestaboard
         # Serializes temporary message writes, expirations and clears
         self._temporary_message_lock = asyncio.Lock()
+        self._expiration_tasks: set[asyncio.Task] = set()
 
         self.model: VestaboardModel | None = None
         self.model_color = config_entry.options.get(CONF_MODEL, COLOR_BLACK)
         self.apply_quiet_hours(config_entry.options)
         self.reload_key = entry_reload_key(config_entry)
+
+    async def async_shutdown(self) -> None:
+        """Fence old recovery before a replacement coordinator can take over."""
+        await super().async_shutdown()
+        self._clear_temporary_state()
+        tasks = tuple(self._expiration_tasks)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        # Cancelled writes may restore bookkeeping, but cannot rearm a timer.
+        self._clear_temporary_state()
 
     @property
     def firmware_version(self) -> str | None:
@@ -282,10 +295,12 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
         if (
             self._restore_after
             and self.temporary_message_expiration
-            and self.temporary_message_expiration <= dt_util.now()
+            and (
+                self.revert_retry_pending
+                or self.temporary_message_expiration <= dt_util.now()
+            )
         ):
             self._failed_revert_messages = ()
-            self._revert_attempt = 0
         else:
             self._clear_temporary_state()
 
@@ -346,6 +361,8 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
         delays = iter(WRITE_RETRY_DELAYS)
         attempt = 0
         while True:
+            if self._shutdown_requested:
+                raise WriteCancelledBeforeSend
             attempt += 1
             try:
                 return await self.vestaboard.write_message(json)
@@ -463,6 +480,8 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
 
     def _arm_expiration(self, expiration: datetime) -> None:
         """Replace the timer, also when a cancelled operation retains recovery."""
+        if self._shutdown_requested:
+            return
         if self._cancel_cb:
             self._cancel_cb()
         self.temporary_message_expiration = expiration
@@ -472,13 +491,26 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
         self.async_update_listeners()
 
     async def _handle_temporary_message_expiration(self, now: datetime) -> None:
-        """Handle temporary message expiration."""
+        """Track recovery tasks so unload can stop queued and running work."""
+        if self._shutdown_requested:
+            return
+        task = asyncio.current_task()
+        self._expiration_tasks.add(task)
+        try:
+            await self._async_expire_temporary_message(now)
+        finally:
+            self._expiration_tasks.discard(task)
+
+    async def _async_expire_temporary_message(self, now: datetime) -> None:
+        """Handle expiration only while this coordinator owns the board."""
         async with self._temporary_message_lock:
+            if self._shutdown_requested:
+                return
             expiration = self.temporary_message_expiration
             if expiration is None or expiration > now:
                 # Already cleared, or a newer temporary message replaced this one
                 return
-            if (restore := self._restore_after) and restore[1] > now:
+            if (restore := self._restore_after) and restore[1] > dt_util.now():
                 characters, restore_expiration = restore
                 try:
                     await self._async_write_temporary_message(
@@ -558,6 +590,8 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
     @callback
     def _schedule_revert_retry(self) -> None:
         """Retry via the existing expiration path, never from a poll."""
+        if self._shutdown_requested:
+            return
         delay = (
             REVERT_RETRY_DELAYS[self._revert_attempt]
             if self._revert_attempt < len(REVERT_RETRY_DELAYS)
