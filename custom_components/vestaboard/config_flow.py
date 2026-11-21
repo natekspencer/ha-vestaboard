@@ -601,7 +601,12 @@ class VestaboardConfigFlow(ConfigFlow, domain=DOMAIN):
             coordinator = entry.runtime_data
             previous = None
             current = coordinator.temporary_message_expiration
-            if current and current > dt_util.now() and coordinator.data:
+            if (
+                current
+                and current > dt_util.now()
+                and coordinator.data
+                and not coordinator.revert_retry_pending
+            ):
                 previous = ([list(row) for row in coordinator.data], current)
             try:
                 characters = coordinator.model.parse_template(
