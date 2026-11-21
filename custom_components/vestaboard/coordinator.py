@@ -147,7 +147,7 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
     # Possibly delivered displays excluded from persistent capture after failed writes.
     _failed_revert_messages: tuple[list[list[int]], ...] = ()
     _revert_attempt: int = 0
-    # Ignore a read begun before a newer write.
+    # Ignore a poll begun before a newer write or recovery observation.
     _write_revision: int = 0
     _write_in_progress: bool = False
     # Called when the persistent message changes, e.g. to save it
@@ -173,24 +173,11 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
         self.vestaboard = vestaboard
         # Serializes temporary message writes, expirations and clears
         self._temporary_message_lock = asyncio.Lock()
-        self._expiration_tasks: set[asyncio.Task] = set()
 
         self.model: VestaboardModel | None = None
         self.model_color = config_entry.options.get(CONF_MODEL, COLOR_BLACK)
         self.apply_quiet_hours(config_entry.options)
         self.reload_key = entry_reload_key(config_entry)
-
-    async def async_shutdown(self) -> None:
-        """Fence old recovery before a replacement coordinator can take over."""
-        await super().async_shutdown()
-        self._clear_temporary_state()
-        tasks = tuple(self._expiration_tasks)
-        for task in tasks:
-            task.cancel()
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
-        # Cancelled writes may restore bookkeeping, but cannot rearm a timer.
-        self._clear_temporary_state()
 
     @property
     def firmware_version(self) -> str | None:
@@ -295,12 +282,10 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
         if (
             self._restore_after
             and self.temporary_message_expiration
-            and (
-                self.revert_retry_pending
-                or self.temporary_message_expiration <= dt_util.now()
-            )
+            and self.temporary_message_expiration <= dt_util.now()
         ):
             self._failed_revert_messages = ()
+            self._revert_attempt = 0
         else:
             self._clear_temporary_state()
 
@@ -361,8 +346,6 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
         delays = iter(WRITE_RETRY_DELAYS)
         attempt = 0
         while True:
-            if self._shutdown_requested:
-                raise WriteNotSent(f"Coordinator for {url} is shut down")
             attempt += 1
             try:
                 return await self.vestaboard.write_message(json)
@@ -480,8 +463,6 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
 
     def _arm_expiration(self, expiration: datetime) -> None:
         """Replace the timer, also when a cancelled operation retains recovery."""
-        if self._shutdown_requested:
-            return
         if self._cancel_cb:
             self._cancel_cb()
         self.temporary_message_expiration = expiration
@@ -491,24 +472,16 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
         self.async_update_listeners()
 
     async def _handle_temporary_message_expiration(self, now: datetime) -> None:
-        """Track recovery tasks so unload can stop queued and running work."""
-        if self._shutdown_requested:
-            return
-        task = asyncio.current_task()
-        self._expiration_tasks.add(task)
-        try:
-            await self._async_expire_temporary_message(now)
-        finally:
-            self._expiration_tasks.discard(task)
-
-    async def _async_expire_temporary_message(self, now: datetime) -> None:
-        """Handle expiration only while this coordinator owns the board."""
+        """Handle temporary message expiration."""
         async with self._temporary_message_lock:
-            if self._shutdown_requested:
-                return
             expiration = self.temporary_message_expiration
             if expiration is None or expiration > now:
                 # Already cleared, or a newer temporary message replaced this one
+                return
+            if (
+                self.revert_retry_pending
+                and not await self._async_confirm_revert_retry()
+            ):
                 return
             if (restore := self._restore_after) and restore[1] > dt_util.now():
                 characters, restore_expiration = restore
@@ -516,18 +489,7 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
                     await self._async_write_temporary_message(
                         {"characters": characters}, restore_expiration
                     )
-                except WriteCancelledBeforeSend:
-                    # The child is still showing and the fired timer is spent.
-                    # Keep the parent handoff and retry it while it is live.
-                    self._restore_after = restore
-                    self._schedule_revert_retry()
-                    raise
-                except Exception as err:
-                    if isinstance(err, WriteNotSent) and self._shutdown_requested:
-                        # Unload rejected the parent before send. Leave the
-                        # handoff for shutdown cleanup, without another write.
-                        self._restore_after = restore
-                        return
+                except Exception:
                     # Don't leave the expired message showing
                     _LOGGER.warning(
                         "Unable to restore the previous temporary message, "
@@ -535,7 +497,6 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
                         exc_info=True,
                     )
                 else:
-                    self._restore_after = None
                     return
             _LOGGER.debug(
                 "Vestaboard temporary message expired @ %s, reverting to persistent message",
@@ -548,6 +509,32 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
                     "Unable to restore the persistent message; timer retry scheduled",
                     exc_info=True,
                 )
+
+    async def _async_confirm_revert_retry(self) -> bool:
+        """Check the actual display, not cached poll data, under the write lock."""
+        try:
+            async with asyncio.timeout(10):
+                display = await self.vestaboard.read_message()
+        except (ClientError, InvalidApiKeyError, TimeoutError) as err:
+            _LOGGER.debug("Deferring Vestaboard restore retry: %r", err)
+            display = None
+        if not display:
+            self._schedule_revert_retry()
+            return False
+
+        if (
+            display != self.persistent_message
+            and display in self._failed_revert_messages
+        ):
+            return True
+
+        # The restore already arrived, or a newer message superseded the alert.
+        rendered = await self.hass.async_add_executor_job(self._prepare_data, display)
+        self._write_revision += 1
+        self._clear_temporary_state()
+        self._set_persistent_message(display)
+        self.async_set_updated_data(self._publish_render(display, rendered))
+        return False
 
     async def _async_revert_to_persistent_message(
         self,
@@ -595,8 +582,6 @@ class VestaboardCoordinator(QuietHoursMixin, DataUpdateCoordinator):
     @callback
     def _schedule_revert_retry(self) -> None:
         """Retry via the existing expiration path, never from a poll."""
-        if self._shutdown_requested:
-            return
         delay = (
             REVERT_RETRY_DELAYS[self._revert_attempt]
             if self._revert_attempt < len(REVERT_RETRY_DELAYS)

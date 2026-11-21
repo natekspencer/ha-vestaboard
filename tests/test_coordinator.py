@@ -316,8 +316,9 @@ async def test_unconfirmed_restore_that_reached_board_is_not_replayed(
     _assert_cleared(coordinator)
 
 
+@pytest.mark.parametrize("poll_first", [True, False], ids=["poll", "timer"])
 async def test_external_change_before_recovery_is_not_overwritten(
-    hass: HomeAssistant, init_integration: MockConfigEntry
+    hass: HomeAssistant, init_integration: MockConfigEntry, poll_first: bool
 ) -> None:
     """Reconcile a native-app write before spending the pending retry."""
     coordinator = init_integration.runtime_data
@@ -328,9 +329,73 @@ async def test_external_change_before_recovery_is_not_overwritten(
     external = [[4] * len(temporary[0]) for _ in temporary]
     await board.write_message({"characters": external})
     with patch.object(board, "write_message", AsyncMock()) as write:
-        await coordinator.async_refresh()
-    write.assert_not_called()
+        if poll_first:
+            await coordinator.async_refresh()
+        else:
+            await coordinator._handle_temporary_message_expiration(
+                coordinator.temporary_message_expiration
+            )
+    write.assert_not_awaited()
     assert coordinator.persistent_message == external
+    assert coordinator.data == external
+    _assert_cleared(coordinator)
+
+
+@pytest.mark.parametrize(
+    "read_result", [None, TimeoutError()], ids=["empty", "timeout"]
+)
+async def test_timer_defers_recovery_without_fresh_read(
+    hass, init_integration, read_result
+):
+    """Cached alert data is not enough to authorize a recovery write."""
+    coordinator = init_integration.runtime_data
+    persistent, temporary, expiration = await _alert(coordinator)
+    board = coordinator.vestaboard
+    with patch.object(board, "write_message", side_effect=TimeoutError):
+        await coordinator._handle_temporary_message_expiration(expiration)
+    deadline = coordinator.temporary_message_expiration
+
+    with (
+        patch("homeassistant.util.dt.now", return_value=deadline),
+        patch.object(
+            board,
+            "read_message",
+            return_value=None,
+            side_effect=read_result,
+        ),
+        patch.object(board, "write_message", wraps=board.write_message) as write,
+    ):
+        await coordinator._handle_temporary_message_expiration(deadline)
+    write.assert_not_awaited()
+    assert board.data == temporary
+    assert coordinator.persistent_message == persistent
+    assert coordinator.temporary_message_expiration == deadline + timedelta(minutes=1)
+    await coordinator._handle_temporary_message_expiration(
+        coordinator.temporary_message_expiration
+    )
+    assert board.data == persistent
+    _assert_cleared(coordinator)
+
+
+async def test_timer_does_not_repeat_an_unacknowledged_restore(hass, init_integration):
+    """If the first restore already reached the board, the timer only reads."""
+    coordinator = init_integration.runtime_data
+    persistent, _, expiration = await _alert(coordinator)
+    board = coordinator.vestaboard
+    original_write = board.write_message
+
+    async def write_then_timeout(payload):
+        await original_write(payload)
+        raise TimeoutError
+
+    with patch.object(board, "write_message", side_effect=write_then_timeout):
+        await coordinator._handle_temporary_message_expiration(expiration)
+    with patch.object(board, "write_message", wraps=original_write) as write:
+        await coordinator._handle_temporary_message_expiration(
+            coordinator.temporary_message_expiration
+        )
+    write.assert_not_awaited()
+    assert coordinator.data == board.data == persistent
     _assert_cleared(coordinator)
 
 
@@ -395,18 +460,24 @@ async def test_clear_after_expiration_leaves_pending_restore_to_callback(
     await coordinator.async_clear_temporary_message()
 
 
-async def test_read_started_before_new_write_cannot_capture_old_alert(
-    hass: HomeAssistant, init_integration: MockConfigEntry
+@pytest.mark.parametrize(
+    "native_edit", [False, True], ids=["service-write", "native-edit"]
+)
+async def test_read_started_before_recovery_cannot_capture_old_alert(
+    hass: HomeAssistant, init_integration: MockConfigEntry, native_edit: bool
 ) -> None:
-    """A stale read cannot undo a newer persistent write or re-arm recovery."""
+    """A stale poll cannot undo recovery based on a newer board read."""
     coordinator = init_integration.runtime_data
     _, temporary, expiration = await _alert(coordinator)
     board = coordinator.vestaboard
     with patch.object(board, "write_message", AsyncMock(side_effect=TimeoutError())):
         await coordinator._handle_temporary_message_expiration(expiration)
     started, release = asyncio.Event(), asyncio.Event()
+    read = board.read_message
 
     async def delayed_read():
+        if started.is_set():
+            return await read()
         started.set()
         await release.wait()
         return temporary
@@ -415,12 +486,17 @@ async def test_read_started_before_new_write_cannot_capture_old_alert(
     with patch.object(board, "read_message", side_effect=delayed_read):
         refresh = asyncio.create_task(coordinator.async_refresh())
         await started.wait()
-        await coordinator.async_write_message({"characters": external})
-        await coordinator._handle_temporary_message_expiration(
-            coordinator.temporary_message_expiration
-        )
-        release.set()
-        await refresh
+        try:
+            if native_edit:
+                await board.write_message({"characters": external})
+            else:
+                await coordinator.async_write_message({"characters": external})
+            await coordinator._handle_temporary_message_expiration(
+                coordinator.temporary_message_expiration
+            )
+        finally:
+            release.set()
+            await refresh
     assert coordinator.persistent_message == external
     assert coordinator.data == external
     _assert_cleared(coordinator)
@@ -1066,59 +1142,6 @@ async def test_immediate_persistent_write_preserves_supplied_settings(
     await c.async_clear_temporary_message()
 
 
-@pytest.mark.parametrize("parent_expires_before_retry", [False, True])
-async def test_cancelled_queued_parent_connect_retry_rearms_timer(
-    hass, init_integration, parent_expires_before_retry
-):
-    """Cancellation before admission preserves the parent and real timer recovery."""
-    try:
-        from pytest_homeassistant.common import async_fire_time_changed
-    except ImportError:  # Home Assistant < 2026.11
-        from pytest_homeassistant_custom_component.common import async_fire_time_changed
-
-    c = init_integration.runtime_data
-    persistent, child, deadline = await _alert(c)
-    parent = [[3] * len(child[0]) for _ in child]
-    parent_deadline = deadline + timedelta(
-        seconds=10 if parent_expires_before_retry else 300
-    )
-    c._restore_after = (parent, parent_deadline)
-    with (
-        patch("homeassistant.util.dt.now", return_value=deadline),
-        patch("custom_components.vestaboard.coordinator.WRITE_RETRY_DELAYS", (60,)),
-        patch.object(
-            c.vestaboard, "write_message", AsyncMock(side_effect=_refused())
-        ) as write,
-    ):
-        task = asyncio.create_task(c._handle_temporary_message_expiration(deadline))
-        await asyncio.sleep(0)
-        assert write.await_count == 1
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
-    retry = c.temporary_message_expiration
-    assert retry > deadline
-    assert c._restore_after == (parent, parent_deadline)
-    assert c._cancel_cb is not None
-    assert not c._failed_revert_messages  # The parent was never sent.
-    assert c.vestaboard.data == child
-    await c.async_refresh()  # Polling must not steal the timer's handoff.
-    with patch("homeassistant.util.dt.now", return_value=retry + timedelta(seconds=1)):
-        async_fire_time_changed(hass, retry + timedelta(seconds=1))
-        await hass.async_block_till_done()
-    if parent_expires_before_retry:
-        assert c.vestaboard.data == persistent
-        _assert_cleared(c)
-    else:
-        assert c.vestaboard.data == parent
-        assert c.temporary_message_expiration == parent_deadline
-        assert c._restore_after is None
-        async_fire_time_changed(hass, parent_deadline + timedelta(seconds=1))
-        await hass.async_block_till_done()
-        assert c.vestaboard.data == persistent
-        _assert_cleared(c)
-
-
 @pytest.mark.parametrize("restore", ["clear", "timer"])
 async def test_deferred_restore_uses_default_transition_settings(
     hass, init_integration, restore
@@ -1144,48 +1167,6 @@ async def test_deferred_restore_uses_default_transition_settings(
             await c._handle_temporary_message_expiration(deadline)
     write.assert_awaited_once_with({"characters": persistent, **defaults})
     _assert_cleared(c)
-
-
-async def test_persistent_confirmation_keeps_cancelled_parent_retry(
-    hass, init_integration
-):
-    """A fresh poll resolves a lost ack without dropping an owed parent retry."""
-    c = init_integration.runtime_data
-    _, child, deadline = await _alert(c)
-    parent = [[3] * len(child[0]) for _ in child]
-    c._restore_after = (parent, deadline + timedelta(minutes=5))
-    replacement = [[4] * len(child[0]) for _ in child]
-    original = c.vestaboard.write_message
-
-    async def accepted(payload):
-        await original(payload)
-        raise TimeoutError
-
-    with patch("homeassistant.util.dt.now", return_value=deadline):
-        with (
-            patch.object(c.vestaboard, "write_message", side_effect=accepted),
-            pytest.raises(HomeAssistantError),
-        ):
-            await c.async_write_message({"characters": replacement})
-        with (
-            patch("custom_components.vestaboard.coordinator.WRITE_RETRY_DELAYS", (60,)),
-            patch.object(c.vestaboard, "write_message", side_effect=_refused()),
-        ):
-            task = asyncio.create_task(c._handle_temporary_message_expiration(deadline))
-            await asyncio.sleep(0)
-            task.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await task
-        retry = c.temporary_message_expiration
-        await c.async_refresh()
-        assert not c._failed_revert_messages
-        assert c.temporary_message_expiration == retry
-        assert c._restore_after == (parent, deadline + timedelta(minutes=5))
-        assert c._cancel_cb is not None
-    with patch("homeassistant.util.dt.now", return_value=retry):
-        await c._handle_temporary_message_expiration(retry)
-    assert c.vestaboard.data == parent
-    await c.async_clear_temporary_message()
 
 
 @pytest.mark.parametrize("late", [False, True])
@@ -1215,108 +1196,55 @@ async def test_parent_deadline_checked_after_waiting_for_lock(
     await c.async_clear_temporary_message()
 
 
-@pytest.mark.parametrize("phase", ["scheduled", "queued", "backoff", "writing"])
-async def test_unload_stops_old_recovery(hass, init_integration, phase):
-    """Real entry unload fences pending, lock-queued and running recovery."""
-    c = init_integration.runtime_data
-    _, _, deadline = await _alert(c)
-    task = None
-
-    async def blocked_write(payload):
-        await asyncio.Future()
-
-    if phase == "scheduled":
-        c._schedule_revert_retry()
-        deadline = c.temporary_message_expiration
-    with (
-        patch("homeassistant.util.dt.now", return_value=deadline),
-        patch("custom_components.vestaboard.coordinator.WRITE_RETRY_DELAYS", (60,)),
-        patch.object(
-            c.vestaboard,
-            "write_message",
-            side_effect=blocked_write if phase == "writing" else _refused(),
-        ) as write,
-    ):
-        if phase == "queued":
-            await c._temporary_message_lock.acquire()
-        if phase != "scheduled":
-            task = asyncio.create_task(c._handle_temporary_message_expiration(deadline))
-            await asyncio.sleep(0)
-        calls = write.await_count
-        assert await hass.config_entries.async_unload(init_integration.entry_id)
-        if phase == "queued":
-            c._temporary_message_lock.release()
-        if task is not None:
-            completed_on_unload = task.done()
-            if not completed_on_unload:
-                task.cancel()  # Cleanup old-head regressions without a 60s wait.
-            await asyncio.gather(task, return_exceptions=True)
-            assert completed_on_unload
-        assert c._cancel_cb is None
-        assert c.temporary_message_expiration is None
-        # Even a callback already dispatched by HA may enter after shutdown.
-        await c._handle_temporary_message_expiration(deadline)
-        c._schedule_revert_retry()
-        assert c._cancel_cb is None
-        assert write.await_count == calls
-
-
-@pytest.mark.parametrize("shutdown_during_backoff", [False, True])
-async def test_service_write_on_shutdown_is_error_not_cancellation(
-    hass, init_integration, shutdown_during_backoff
+@pytest.mark.parametrize(
+    ("retry_pending", "write_after_reload"),
+    [(False, False), (True, False), (True, True)],
+    ids=["alert", "retry", "new-write-before-retry"],
+)
+async def test_reload_preserves_pending_restore(
+    hass, retry_pending, write_after_reload
 ):
-    """A service rejected before send fails normally, without cancelling its task."""
-    c = init_integration.runtime_data
+    """An options reload must not strand an alert on a physical board."""
+    from custom_components.vestaboard.client import VestaboardVirtualClient
+    from custom_components.vestaboard.const import CONF_ENTRY_TYPE, ENTRY_TYPE_DEVICE
 
-    async def refuse_and_shutdown(payload):
-        c._shutdown_requested = True
-        raise _refused()
+    try:
+        from pytest_homeassistant.common import async_fire_time_changed
+    except ImportError:  # Home Assistant < 2026.11
+        from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
-    if not shutdown_during_backoff:
-        await c.async_shutdown()
-    with (
-        patch.object(
-            c.vestaboard, "write_message", side_effect=refuse_and_shutdown
-        ) as write,
-        pytest.raises(HomeAssistantError, match="shut down"),
-    ):
-        await _send(hass, init_integration)
-    assert write.await_count == int(shutdown_during_backoff)
+    # A physical display survives across clients. The virtual integration's
+    # persistent store would mask the bug by replacing the display on setup.
+    board = VestaboardVirtualClient("Shared display", 6, 22)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Shared display",
+        data={CONF_ENTRY_TYPE: ENTRY_TYPE_DEVICE},
+    )
+    entry.add_to_hass(hass)
+    with patch("custom_components.vestaboard.create_client", return_value=board):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        old = entry.runtime_data
+        persistent, temporary, deadline = await _alert(old)
+        if retry_pending:
+            with patch.object(board, "write_message", side_effect=TimeoutError):
+                await old._handle_temporary_message_expiration(deadline)
+            assert old.persistent_message == persistent
+            assert board.data == temporary
+            deadline = old.temporary_message_expiration
 
+        assert await hass.config_entries.async_reload(entry.entry_id)
+        current = entry.runtime_data
+        assert current is not old
+        assert board.data == temporary
+        expected = persistent
+        if write_after_reload:
+            expected = [[3] * len(persistent[0]) for _ in persistent]
+            await current.async_write_message({"characters": expected})
 
-async def test_parent_restore_shutdown_does_not_attempt_persistent_revert(
-    hass, init_integration
-):
-    """Shutdown during refused-parent backoff retains handoff without another write."""
-    c = init_integration.runtime_data
-    persistent, child, deadline = await _alert(c)
-    parent = [[3] * len(child[0]) for _ in child]
-    handoff = (parent, deadline + timedelta(minutes=5))
-    c._restore_after = handoff
-
-    async def refuse_and_shutdown(payload):
-        c._shutdown_requested = True
-        raise _refused()
-
-    with (
-        patch("homeassistant.util.dt.now", return_value=deadline),
-        patch.object(
-            c.vestaboard, "write_message", side_effect=refuse_and_shutdown
-        ) as write,
-        patch.object(
-            c,
-            "_async_revert_to_persistent_message",
-            wraps=c._async_revert_to_persistent_message,
-        ) as revert,
-        patch.object(c, "_arm_expiration", wraps=c._arm_expiration) as arm,
-    ):
-        await c._handle_temporary_message_expiration(deadline)
-    write.assert_awaited_once_with({"characters": parent})
-    revert.assert_not_awaited()
-    arm.assert_not_called()
-    assert c._restore_after == handoff
-    assert c.temporary_message_expiration == deadline
-    assert c.persistent_message == persistent
-    assert c.vestaboard.data == child
-    assert not c._failed_revert_messages
-    await c.async_shutdown()
+    async_fire_time_changed(hass, deadline + timedelta(seconds=1))
+    await hass.async_block_till_done()
+    assert board.data == expected
+    _assert_cleared(old)
+    await current.async_refresh()
+    assert current.persistent_message == expected
